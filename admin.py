@@ -220,25 +220,30 @@ def main_reply_menu(is_admin_user: bool = True) -> ReplyKeyboardMarkup:
 
 
 def admin_menu_keyboard() -> InlineKeyboardMarkup:
+    # Most rows: 3 buttons per row (clean grid)
+    # Last row: Stats + Menu (2 per row)
     return kb(
         [
             [
                 InlineKeyboardButton("➕ Add Account", callback_data="admin:addaccount"),
                 InlineKeyboardButton("👤 Credits", callback_data="admin:credits"),
+                InlineKeyboardButton("📦 Accounts", callback_data="admin:accounts"),
             ],
             [
+                InlineKeyboardButton("💳 Deposits", callback_data="admin:deposits"),
                 InlineKeyboardButton("💰 Active Credits", callback_data="admin:activecredits:0"),
                 InlineKeyboardButton("📱 Sessions", callback_data="admin:sessions"),
             ],
-            [InlineKeyboardButton("🎁 Referrals", callback_data="admin:referrals:0"), InlineKeyboardButton("🎟 Edit Tokens", callback_data="admin:tokenedit")],
-            [InlineKeyboardButton("🚫 Ban System", callback_data="admin:banmenu")],
-            [InlineKeyboardButton("💠 QRs", callback_data="admin:qrs")],
             [
-                InlineKeyboardButton("📦 Accounts", callback_data="admin:accounts"),
-                InlineKeyboardButton("💳 Deposits", callback_data="admin:deposits"),
+                InlineKeyboardButton("💠 QRs", callback_data="admin:qrs"),
+                InlineKeyboardButton("🎁 Referrals", callback_data="admin:referrals:0"),
+                InlineKeyboardButton("🎟 Edit Tokens", callback_data="admin:tokenedit"),
             ],
-            [InlineKeyboardButton("📊 Stats", callback_data="admin:stats")],
-            [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
+            [
+                InlineKeyboardButton("🚫 Ban System", callback_data="admin:banmenu"),
+                InlineKeyboardButton("📊 Stats", callback_data="admin:stats"),
+                InlineKeyboardButton("🏠 Menu", callback_data="menu:home"),
+            ],
         ]
     )
 
