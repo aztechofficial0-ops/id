@@ -2,7 +2,7 @@ import os
 from typing import Dict, List, Optional, TypedDict
 
 # Telegram Bot token
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8486930233:AAFgfpSxCxeE1vUZ4L1WkK-vx83OtKTaYHY")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8327382350:AAGY4xq3o7iNn_KcMz7fCQ1a3N7BlWZcm2I")
 
 # Mongo
 MONGO_URI = os.getenv(
