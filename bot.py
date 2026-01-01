@@ -174,11 +174,18 @@ async def _send_qr(
 ):
     """Send a QR/code image using hosted URL only.
 
+    Works for both message and callback updates.
     If sending the hosted image fails, falls back to text-only instructions.
     """
+    target = update.effective_message
+    if target is None and update.callback_query is not None:
+        target = update.callback_query.message
+    if target is None:
+        raise RuntimeError("No message target available to send QR")
+
     if image_url:
         try:
-            return await update.message.reply_photo(
+            return await target.reply_photo(
                 photo=image_url,
                 caption=caption,
                 reply_markup=buttons,
@@ -188,7 +195,7 @@ async def _send_qr(
             pass
 
     # fallback: text only
-    return await update.message.reply_text(
+    return await target.reply_text(
         caption,
         reply_markup=buttons,
         parse_mode=parse_mode,
@@ -297,6 +304,24 @@ def _find_results_kb(groups: list[dict[str, Any]], *, max_price: int, page: int,
 
     rows.append([InlineKeyboardButton("⬅️ Back", callback_data="menu:home")])
     return kb(rows)
+
+
+def inr_amount_kb(amount_str: str) -> InlineKeyboardMarkup:
+    # 0-9 keypad + delete + back/cancel/confirm
+    display = amount_str if amount_str else "0"
+    return kb(
+        [
+            [InlineKeyboardButton("1", callback_data="inrpad:1"), InlineKeyboardButton("2", callback_data="inrpad:2"), InlineKeyboardButton("3", callback_data="inrpad:3")],
+            [InlineKeyboardButton("4", callback_data="inrpad:4"), InlineKeyboardButton("5", callback_data="inrpad:5"), InlineKeyboardButton("6", callback_data="inrpad:6")],
+            [InlineKeyboardButton("7", callback_data="inrpad:7"), InlineKeyboardButton("8", callback_data="inrpad:8"), InlineKeyboardButton("9", callback_data="inrpad:9")],
+            [InlineKeyboardButton("0", callback_data="inrpad:0"), InlineKeyboardButton("⌫", callback_data="inrpad:del")],
+            [
+                InlineKeyboardButton("⬅️ Back", callback_data="dep:inr"),
+                InlineKeyboardButton("❌ Cancel", callback_data="dep:cancel"),
+                InlineKeyboardButton("✅ Confirm", callback_data="inrpad:ok"),
+            ],
+        ]
+    )
 
 
 def years_keyboard(country: str, years: list[dict]) -> InlineKeyboardMarkup:
@@ -1479,12 +1504,15 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if qr_key not in INR_QRS:
             await safe_query_answer(query, "Invalid QR", show_alert=True)
             return
+
         STATE[uid]["inr_qr"] = qr_key
-        STATE[uid]["step"] = "amount"
+        STATE[uid]["step"] = "inr_amount_pad"
+        STATE[uid]["amount_str"] = ""
+
         await safe_edit(
             query.message,
-            f"🇮🇳 INR Deposit ({INR_QRS[qr_key].get('label','')})\n\n✍️ Send deposit amount in INR (numbers only):",
-            reply_markup=kb([[InlineKeyboardButton("⬅️ Back", callback_data="dep:inr"), InlineKeyboardButton("🏠 Menu", callback_data="menu:home")]]),
+            f"🇮🇳 INR Deposit ({INR_QRS[qr_key].get('label','')})\n\nEnter amount:",
+            reply_markup=inr_amount_kb(""),
             parse_mode=None,
         )
         return
@@ -1617,6 +1645,65 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             parse_mode=None,
         )
         await send_purchase_details(update, context, account)
+        return
+
+    # INR dial pad
+    if data.startswith("inrpad:"):
+        await safe_query_answer(query, cache_time=0)
+        if uid not in STATE or STATE[uid].get("flow") != "deposit" or STATE[uid].get("step") != "inr_amount_pad":
+            return
+        st = STATE[uid]
+        amt = str(st.get("amount_str") or "")
+        action = data.split(":", 1)[1]
+
+        if action.isdigit():
+            amt = (amt + action).lstrip("0")
+        elif action == "del":
+            amt = amt[:-1]
+        elif action == "ok":
+            if not amt.isdigit() or int(amt) <= 0:
+                await safe_query_answer(query, "Enter valid amount", show_alert=True)
+                return
+            st["amount"] = int(amt)
+            st["step"] = "confirm"
+
+            # Reuse existing INR QR send logic by calling the same code path via text handler
+            cfg = INR_QRS.get((st.get("inr_qr") or "qr1").strip().lower()) or INR_QRS.get("qr1") or {}
+            payee = (cfg.get("payee_name") or "").strip()
+            upi_id = (cfg.get("upi_id") or "").strip()
+            notes = (cfg.get("notes") or "").strip()
+            base_caption = (
+                "PAYMENT INFORMATION\n\n"
+                + (f"NAME WILL BE -  {payee}\n\n" if payee else "")
+                + (f"UPI :  {upi_id}\n\n" if upi_id else "")
+                + (f"{notes}\n\n" if notes else "")
+                + "⏳ QR will expire in 5 minutes\n"
+                + f"Amount: {st['amount']} INR"
+            )
+
+            buttons = kb(
+                [
+                    [InlineKeyboardButton("✅ Confirm", callback_data="dep:confirm")],
+                    [InlineKeyboardButton("❌ Cancel", callback_data="dep:cancel")],
+                ]
+            )
+
+            msg = await _send_qr(
+                update,
+                caption=base_caption,
+                buttons=buttons,
+                image_url=(cfg.get("image_url") or "").strip() or None,
+                parse_mode=None,
+            )
+            st["qr_chat_id"] = msg.chat_id
+            st["qr_message_id"] = msg.message_id
+            asyncio.create_task(_qr_expiry_task(context, st["qr_chat_id"], st["qr_message_id"], base_caption))
+            return
+
+        st["amount_str"] = amt
+        # Update screen
+        label = f"Enter amount:\n{(amt if amt else '0')}"
+        await safe_edit(query.message, label, reply_markup=inr_amount_kb(amt), parse_mode=None)
         return
 
     # Shop
