@@ -435,7 +435,8 @@ class Repo:
         api_hash: str,
         session_string: str,
         added_by: int,
-        year: int | None = None,
+        year: int | str | None = None,
+        premium_months: int | None = None,
         country: str | None = None,
         country_emoji: str | None = None,
         twofa_password: str | None = None,
@@ -450,7 +451,8 @@ class Repo:
             "twofa_password": twofa_password,
             "country": country,
             "country_emoji": country_emoji,
-            "year": int(year) if year is not None else None,
+            "year": int(year) if isinstance(year, int) else (str(year) if year is not None else None),
+            "premium_months": int(premium_months) if premium_months is not None else None,
             "price": int(price) if price is not None else None,
             "status": "available",  # available|assigned
             "assigned_to": None,
@@ -703,6 +705,7 @@ class Repo:
                     "country": _id.get("country"),
                     "country_emoji": _id.get("country_emoji"),
                     "year": _id.get("year"),
+                    "premium_months": _id.get("premium_months"),
                     "price": _id.get("price"),
                     "count": row.get("count", 0),
                 }
