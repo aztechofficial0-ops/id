@@ -1349,13 +1349,32 @@ async def handle_admin_text(
             t = text.strip().lower()
             if t == "skip":
                 st["year"] = None
-            else:
-                if not t.isdigit() or len(t) != 4:
-                    await update.message.reply_text("Year must be 4 digits like 2023, or type 'skip':")
-                    return True
-                st["year"] = int(t)
+                st["premium_months"] = None
+                st["step"] = "price"
+                await update.message.reply_text("Send price in credits for this account (example 75):")
+                return True
 
-            # Country/emoji are auto-detected from phone; proceed directly to price.
+            if t == "premium":
+                st["year"] = "premium"
+                st["step"] = "premium_months"
+                await update.message.reply_text("⭐ Premium selected. Send premium months (number, e.g. 1):")
+                return True
+
+            if not t.isdigit() or len(t) != 4:
+                await update.message.reply_text("Year must be 4 digits like 2023, or type 'premium', or 'skip':")
+                return True
+            st["year"] = int(t)
+            st["premium_months"] = None
+
+            st["step"] = "price"
+            await update.message.reply_text("Send price in credits for this account (example 75):")
+            return True
+
+        if step == "premium_months":
+            if not text.isdigit() or int(text) <= 0:
+                await update.message.reply_text("Send premium months as a number (e.g. 1):")
+                return True
+            st["premium_months"] = int(text)
             st["step"] = "price"
             await update.message.reply_text("Send price in credits for this account (example 75):")
             return True
@@ -1391,6 +1410,7 @@ async def handle_admin_text(
                 session_string=doc["session_string"],
                 added_by=uid,
                 year=st.get("year"),
+                premium_months=st.get("premium_months"),
                 country=st.get("country"),
                 country_emoji=st.get("country_emoji"),
                 twofa_password=st.get("twofa_password"),
@@ -1422,6 +1442,7 @@ async def handle_admin_text(
                 session_string=doc["session_string"],
                 added_by=uid,
                 year=st.get("year"),
+                premium_months=st.get("premium_months"),
                 country=st.get("country"),
                 country_emoji=st.get("country_emoji"),
                 twofa_password=st.get("twofa_password"),
