@@ -2,7 +2,7 @@ import os
 from typing import Dict, List, Optional, TypedDict
 
 # Telegram Bot token
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8327382350:AAGY4xq3o7iNn_KcMz7fCQ1a3N7BlWZcm2I")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8542265590:AAE5JEjA6-N9cfkR1il2aIkyByh6EDUWRqc")
 
 # Mongo
 MONGO_URI = os.getenv(
@@ -110,4 +110,5 @@ CRYPTO_NETWORKS: Dict[str, CryptoNetworkCfg] = {
         "image_url": "https://i.postimg.cc/VL8sw-XGf/binance.jpg",
     },
 }
+
 
