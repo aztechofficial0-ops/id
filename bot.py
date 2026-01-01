@@ -157,8 +157,23 @@ async def safe_reply_text(message, text: str, **kwargs):
         except (TimedOut, NetworkError) as e:
             last_exc = e
             await asyncio.sleep(1)
-        except BadRequest as e:
-            # Don't retry bad requests
+        except BadRequest:
+            raise
+    if last_exc:
+        raise last_exc
+
+
+async def safe_bot_send(bot, method_name: str, **kwargs):
+    """Call context.bot.send_* with retry on transient timeouts."""
+    last_exc: Exception | None = None
+    fn = getattr(bot, method_name)
+    for _ in range(3):
+        try:
+            return await fn(**kwargs)
+        except (TimedOut, NetworkError) as e:
+            last_exc = e
+            await asyncio.sleep(1)
+        except BadRequest:
             raise
     if last_exc:
         raise last_exc
@@ -329,18 +344,39 @@ def inr_amount_kb(amount_str: str) -> InlineKeyboardMarkup:
 
 
 def years_keyboard(country: str, years: list[dict]) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
+    # Sort: Premium first, then numeric years desc, then Unknown/None last
+    def _sort_key(item: dict):
+        y = item.get("year")
+        if y == "premium":
+            return (0, 0)
+        if isinstance(y, int):
+            return (1, -y)
+        if isinstance(y, str) and y.isdigit():
+            return (1, -int(y))
+        return (2, 0)
 
-    for y in years:
+    years_sorted = sorted(years, key=_sort_key)
+
+    rows: list[list[InlineKeyboardButton]] = []
+    cur: list[InlineKeyboardButton] = []
+
+    for y in years_sorted:
         year = y.get("year")
         count = y.get("count", 0)
         val = str(year) if year is not None else "none"
+
         if year == "premium":
             label = f"⭐ Premium ({count})"
         else:
             label = f"{year} ({count})" if year is not None else f"Unknown ({count})"
 
-        rows.append([InlineKeyboardButton(label, callback_data=f"shop:year:{country}:{val}")])
+        cur.append(InlineKeyboardButton(label, callback_data=f"shop:year:{country}:{val}"))
+        if len(cur) == 3:
+            rows.append(cur)
+            cur = []
+
+    if cur:
+        rows.append(cur)
 
     rows.append([InlineKeyboardButton("⬅️ Back", callback_data="shop:countries")])
     return kb(rows)
@@ -933,7 +969,9 @@ async def _forward_deposit_to_admins(
     for admin_id in ADMIN_USER_IDS:
         try:
             if file_kind == "photo":
-                await context.bot.send_photo(
+                await safe_bot_send(
+                    context.bot,
+                    "send_photo",
                     chat_id=admin_id,
                     photo=file_id,
                     caption=info,
@@ -941,7 +979,9 @@ async def _forward_deposit_to_admins(
                     reply_markup=approve_markup,
                 )
             else:
-                await context.bot.send_document(
+                await safe_bot_send(
+                    context.bot,
+                    "send_document",
                     chat_id=admin_id,
                     document=file_id,
                     caption=info,
