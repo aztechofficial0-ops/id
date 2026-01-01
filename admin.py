@@ -232,6 +232,7 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton("🎁 Referrals", callback_data="admin:referrals:0"), InlineKeyboardButton("🎟 Edit Tokens", callback_data="admin:tokenedit")],
             [InlineKeyboardButton("🚫 Ban System", callback_data="admin:banmenu")],
+            [InlineKeyboardButton("💠 QRs", callback_data="admin:qrs")],
             [
                 InlineKeyboardButton("📦 Accounts", callback_data="admin:accounts"),
                 InlineKeyboardButton("💳 Deposits", callback_data="admin:deposits"),
@@ -653,6 +654,55 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 [
                     [InlineKeyboardButton("✅ Yes, delete", callback_data="admin:sessions:purge_confirm")],
                     [InlineKeyboardButton("❌ Cancel", callback_data="admin:sessions")],
+                ]
+            ),
+        )
+        return True
+
+    if data == "admin:qrs":
+        await query.answer(cache_time=0)
+        await restore_main_reply_menu(query.message)
+        flags = await repo.get_inr_qr_flags()
+        qr1 = "ON ✅" if flags.get("qr1") else "OFF ❌"
+        qr2 = "ON ✅" if flags.get("qr2") else "OFF ❌"
+        text = f"💠 INR QRs\n\nQR 1: {qr1}\nQR 2: {qr2}"
+        await safe_edit(
+            query.message,
+            text,
+            parse_mode=None,
+            reply_markup=kb(
+                [
+                    [
+                        InlineKeyboardButton("Toggle QR 1", callback_data="admin:qrs:toggle:qr1"),
+                        InlineKeyboardButton("Toggle QR 2", callback_data="admin:qrs:toggle:qr2"),
+                    ],
+                    [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
+                ]
+            ),
+        )
+        return True
+
+    if data.startswith("admin:qrs:toggle:"):
+        await query.answer(cache_time=0)
+        await restore_main_reply_menu(query.message)
+        qr_key = data.split(":", 3)[3]
+        flags = await repo.get_inr_qr_flags()
+        new_enabled = not bool(flags.get(qr_key))
+        flags = await repo.set_inr_qr_flag(qr_key=qr_key, enabled=new_enabled)
+        qr1 = "ON ✅" if flags.get("qr1") else "OFF ❌"
+        qr2 = "ON ✅" if flags.get("qr2") else "OFF ❌"
+        text = f"💠 INR QRs\n\nQR 1: {qr1}\nQR 2: {qr2}"
+        await safe_edit(
+            query.message,
+            text,
+            parse_mode=None,
+            reply_markup=kb(
+                [
+                    [
+                        InlineKeyboardButton("Toggle QR 1", callback_data="admin:qrs:toggle:qr1"),
+                        InlineKeyboardButton("Toggle QR 2", callback_data="admin:qrs:toggle:qr2"),
+                    ],
+                    [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
                 ]
             ),
         )
