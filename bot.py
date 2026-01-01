@@ -278,7 +278,11 @@ def _find_results_kb(groups: list[dict[str, Any]], *, max_price: int, page: int,
         country = g.get("country") or "?"
         year = g.get("year")
         year_token = "none" if year is None else str(year)
-        year_txt = str(year) if year is not None else "Unknown"
+        if year == "premium":
+            m = g.get("premium_months")
+            year_txt = f"⭐ Premium ({m}m)" if m else "⭐ Premium"
+        else:
+            year_txt = str(year) if year is not None else "Unknown"
         price = int(g.get("price") or 0)
         count = int(g.get("count") or 0)
         label = f"{emoji} {year_txt} • {price}c ({count})"
@@ -331,7 +335,10 @@ def years_keyboard(country: str, years: list[dict]) -> InlineKeyboardMarkup:
         year = y.get("year")
         count = y.get("count", 0)
         val = str(year) if year is not None else "none"
-        label = f"{year} ({count})" if year is not None else f"Unknown ({count})"
+        if year == "premium":
+            label = f"⭐ Premium ({count})"
+        else:
+            label = f"{year} ({count})" if year is not None else f"Unknown ({count})"
 
         rows.append([InlineKeyboardButton(label, callback_data=f"shop:year:{country}:{val}")])
 
@@ -796,6 +803,7 @@ async def send_purchase_details(update: Update, context: ContextTypes.DEFAULT_TY
     country_emoji = account.get("country_emoji") or ""
     country = account.get("country") or ""
     year = account.get("year")
+    premium_months = account.get("premium_months")
     twofa = account.get("twofa_password")
 
     # Show discount info if applied
@@ -814,7 +822,7 @@ async def send_purchase_details(update: Update, context: ContextTypes.DEFAULT_TY
         "✅ *Purchase successful*\n\n"
         f"Phone: `{country_emoji} +{phone}`\n"
         f"Country: *{country}*\n"
-        f"Year: *{year if year is not None else '-'}*\n"
+        f"Year: *{('⭐ Premium (' + str(premium_months) + 'm)') if year == 'premium' and premium_months else ('⭐ Premium' if year == 'premium' else (year if year is not None else '-'))}*\n"
         f"{price_line}\n\n"
         "Now login to Telegram using this phone number.\n"
         "I will forward OTP here."
