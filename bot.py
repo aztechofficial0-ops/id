@@ -1437,20 +1437,36 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if data == "dep:inr":
         await safe_query_answer(query, cache_time=0)
+        flags = await repo.get_inr_qr_flags()
+        enabled = [k for k, v in flags.items() if v]
+        if not enabled:
+            await safe_edit(
+                query.message,
+                "🇮🇳 INR Deposit\n\nNo QR available for INR.",
+                reply_markup=kb([[InlineKeyboardButton("⬅️ Back", callback_data="dep:start"), InlineKeyboardButton("🏠 Menu", callback_data="menu:home")]]),
+                parse_mode=None,
+            )
+            return
+
         # Step: choose which INR QR to use
         STATE[uid] = {"flow": "deposit", "step": "inr_qr_choose", "method": "inr", "network": None}
+        qr_buttons: list[InlineKeyboardButton] = []
+        if flags.get("qr1"):
+            qr_buttons.append(InlineKeyboardButton("QR 1", callback_data="dep:inrqr:qr1"))
+        if flags.get("qr2"):
+            qr_buttons.append(InlineKeyboardButton("QR 2", callback_data="dep:inrqr:qr2"))
+
+        rows: list[list[InlineKeyboardButton]] = []
+        if len(qr_buttons) == 2:
+            rows.append(qr_buttons)
+        else:
+            rows.append([qr_buttons[0]])
+        rows.append([InlineKeyboardButton("⬅️ Back", callback_data="dep:start"), InlineKeyboardButton("🏠 Menu", callback_data="menu:home")])
+
         await safe_edit(
             query.message,
             "🇮🇳 INR Deposit\n\nSelect QR:",
-            reply_markup=kb(
-                [
-                    [
-                        InlineKeyboardButton("QR 1", callback_data="dep:inrqr:qr1"),
-                        InlineKeyboardButton("QR 2", callback_data="dep:inrqr:qr2"),
-                    ],
-                    [InlineKeyboardButton("⬅️ Back", callback_data="dep:start"), InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
-                ]
-            ),
+            reply_markup=kb(rows),
             parse_mode=None,
         )
         return
