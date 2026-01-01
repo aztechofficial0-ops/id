@@ -28,7 +28,7 @@ BOT_USERNAME = os.getenv("BOT_USERNAME", "DreamAccountbot")
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "DreamAccountSup")  # without @
 
 # Report channel (bot must be admin there). Without @
-REPORT_CHANNEL_USERNAME = os.getenv("REPORT_CHANNEL_USERNAME", "dreamAccreport")
+REPORT_CHANNEL_USERNAME = os.getenv("REPORT_CHANNEL_USERNAME", "Dreamaccsreport")
 
 # Fixed Telegram API credentials used for adding accounts (admin flow)
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "31538472"))
@@ -110,5 +110,4 @@ CRYPTO_NETWORKS: Dict[str, CryptoNetworkCfg] = {
         "image_url": "https://i.postimg.cc/VL8sw-XGf/binance.jpg",
     },
 }
-
 
