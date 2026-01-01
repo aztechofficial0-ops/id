@@ -58,6 +58,9 @@ async def init_indexes() -> None:
     # bans
     await db.banned_users.create_index([("user_id", 1)], unique=True)
 
+    # qr settings
+    await db.qr_settings.create_index([("key", 1)], unique=True)
+
 
 class Repo:
     def __init__(self, db: AsyncIOMotorDatabase):
@@ -182,6 +185,29 @@ class Repo:
     async def unban_user(self, *, user_id: int) -> bool:
         res = await self.db.banned_users.delete_one({"user_id": int(user_id)})
         return res.deleted_count == 1
+
+    # ----------------------------
+    # QR settings
+    # ----------------------------
+    async def get_inr_qr_flags(self) -> dict[str, bool]:
+        """Return {'qr1': bool, 'qr2': bool}. Defaults to both True."""
+        doc = await self.db.qr_settings.find_one({"key": "inr"})
+        if not doc:
+            return {"qr1": True, "qr2": True}
+        return {
+            "qr1": bool(doc.get("qr1", True)),
+            "qr2": bool(doc.get("qr2", True)),
+        }
+
+    async def set_inr_qr_flag(self, *, qr_key: str, enabled: bool) -> dict[str, bool]:
+        if qr_key not in {"qr1", "qr2"}:
+            return await self.get_inr_qr_flags()
+        await self.db.qr_settings.update_one(
+            {"key": "inr"},
+            {"$set": {"key": "inr", qr_key: bool(enabled), "updated_at": utcnow()}},
+            upsert=True,
+        )
+        return await self.get_inr_qr_flags()
 
     async def try_credit_referral_on_first_approved_deposit(self, *, referred_user_id: int) -> dict[str, Any] | None:
         """If referred_user has a referral and this is their first approved deposit, grant +1 token.
