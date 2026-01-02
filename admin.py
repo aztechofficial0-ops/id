@@ -79,42 +79,52 @@ async def _notify_referral_award(
     context: ContextTypes.DEFAULT_TYPE,
     repo: Repo,
     referred_user_id: int,
+    deposit_amount: int,
+    admin_id: int,
+    deposit_id: str | None = None,
 ) -> None:
-    """If referred user just completed FIRST approved deposit, award +1 token to referrer and notify both."""
-    info = await repo.try_credit_referral_on_first_approved_deposit(referred_user_id=int(referred_user_id))
-    if not info:
+    """Credit referral earning to referrer (forever) and notify them.
+
+    Note: This is called after a deposit is approved.
+    """
+    # Find referral mapping
+    ref = await repo.db.referrals.find_one({"referred_user_id": int(referred_user_id)})
+    if not ref:
         return
 
-    referrer_id = int(info["referrer_user_id"])
-    referred_id = int(info["referred_user_id"])
-    referred_un = (info.get("referred_username") or "").strip()
-    tokens_now = int(info.get("tokens_now", 0))
+    referrer_id = int(ref.get("referrer_user_id") or 0)
+    if not referrer_id:
+        return
 
+    reward = int(round((int(deposit_amount) * float(REFERRAL_PERCENT)) / 100.0))
+    if reward <= 0:
+        return
+
+    user = await repo.add_referral_earning(
+        referrer_user_id=referrer_id,
+        referred_user_id=int(referred_user_id),
+        amount=float(reward),
+        by_admin=int(admin_id),
+        deposit_id=str(deposit_id) if deposit_id else None,
+        deposit_amount=int(deposit_amount),
+    )
+
+    referred_un = (ref.get("referred_username") or "").strip()
     ref_line = f"@{referred_un}" if referred_un else "N/A"
 
-    # Referrer message
-    await context.bot.send_message(
-        chat_id=referrer_id,
-        text=(
-            "🎉 Referral Reward Unlocked!\n"
-            f"• New user deposit approved: {referred_id} {ref_line}\n"
-            "• You earned: +1 token\n"
-            "• Benefit: -5 credits for 1 purchase\n"
-            f"• Tokens now: {tokens_now}"
-        ),
-    )
-
-    # Referred user message
-    await context.bot.send_message(
-        chat_id=referred_id,
-        text=(
-            f"✅ You were referred by user: {referrer_id}\n"
-            "✅ Successfully 1 token added to your referrer.\n\n"
-            "You can also refer users using your link:\n"
-            f"https://t.me/{BOT_USERNAME}?start=ref_{referred_id}\n\n" if BOT_USERNAME else f"/start ref_{referred_id}\n\n"
-            "Get discount: Each successful referral (first deposit approved) gives -5 credits for 1 purchase."
-        ),
-    )
+    try:
+        await context.bot.send_message(
+            chat_id=referrer_id,
+            text=(
+                "🎉 Referral Reward Added!\n"
+                f"• From user: {referred_user_id} {ref_line}\n"
+                f"• Deposit: ₹{int(deposit_amount)}\n"
+                f"• Reward: +₹{reward} credits ({REFERRAL_PERCENT:.1f}%)\n"
+                f"• New Balance: {int((user or {}).get('credits', 0))} credits"
+            ),
+        )
+    except Exception:
+        pass
 
 
 async def safe_edit(
@@ -177,7 +187,7 @@ def deposits_keyboard(
       rows.append([InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")])
       return kb(rows)
 
-from config import ADMIN_USER_IDS, TELEGRAM_API_ID, TELEGRAM_API_HASH, BOT_USERNAME
+from config import ADMIN_USER_IDS, TELEGRAM_API_ID, TELEGRAM_API_HASH, BOT_USERNAME, REFERRAL_PERCENT
 from database import Repo, get_db
 
 
@@ -237,7 +247,6 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton("💠 QRs", callback_data="admin:qrs"),
                 InlineKeyboardButton("🎁 Referrals", callback_data="admin:referrals:0"),
-                InlineKeyboardButton("🎟 Edit Tokens", callback_data="admin:tokenedit"),
             ],
             [
                 InlineKeyboardButton("🚫 Ban System", callback_data="admin:banmenu"),
@@ -792,35 +801,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return True
 
-    if data == "admin:tokenedit":
-        await query.answer(cache_time=0)
-        await restore_main_reply_menu(query.message)
-        await safe_edit(
-            query.message,
-            "🎟 Edit Tokens\n\nChoose action:",
-            parse_mode=None,
-            reply_markup=kb(
-                [
-                    [
-                        InlineKeyboardButton("➕ Add Token", callback_data="admin:tokenedit:add"),
-                        InlineKeyboardButton("➖ Remove Token", callback_data="admin:tokenedit:remove"),
-                    ],
-                    [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
-                ]
-            ),
-        )
-        return True
-
-    if data in {"admin:tokenedit:add", "admin:tokenedit:remove"}:
-        await query.answer(cache_time=0)
-        await restore_main_reply_menu(query.message)
-        mode = "add" if data.endswith(":add") else "remove"
-        state[uid] = {"flow": "admin_tokenedit", "step": "input", "mode": mode}
-        await query.message.reply_text(
-            f"🎟 Edit Tokens ({mode})\n\nSend in one line:\n<user_id> <count>\nExample: 38838383838 3\n\nType Cancel to stop.",
-            reply_markup=cancel_reply_kb(),
-        )
-        return True
+    # (Edit Tokens removed)
 
     if data.startswith("admin:referrals:"):
         await query.answer(cache_time=0)
@@ -850,10 +831,10 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 rid = int(r.get("_id") or 0)
                 uname = (r.get("username") or "").strip()
                 ref_count = int(r.get("count") or 0)
-                tok_doc = await db.ref_tokens.find_one({"user_id": rid})
-                tokens = int((tok_doc or {}).get("tokens", 0))
+                udoc = await db.users.find_one({"user_id": rid})
+                earned = float((udoc or {}).get("ref_earned_total", 0.0) or 0.0)
                 uline = f"@{uname}" if uname else "N/A"
-                lines.append(f"• {rid} | {uline} | refs: {ref_count} | tokens: {tokens}")
+                lines.append(f"• {rid} | {uline} | refs: {ref_count} | earned: ₹{earned:.2f}")
 
         nav: list[list[InlineKeyboardButton]] = []
         btns: list[InlineKeyboardButton] = []
@@ -1216,7 +1197,10 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("❌ Deposit not found or already processed.", show_alert=True)
             return True
 
-        credits = int(dep.get("amount", 0))
+        base = int(dep.get("amount", 0))
+        bonus = int(round((base * float(REFERRAL_PERCENT)) / 100.0))
+        credits = base + bonus
+
         dep2 = await repo.mark_deposit(dep_id, "approved", admin_id=uid, credits_added=credits)
         if not dep2:
             await query.answer("❌ Deposit not found or already processed.", show_alert=True)
@@ -1224,17 +1208,34 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
         await repo.add_credits(dep["user_id"], credits, by_admin=uid)
         await query.answer("✅ Approved and credits added.", show_alert=True)
+
+        # notify depositor with bonus
         try:
+            udoc = await repo.db.users.find_one({"user_id": int(dep["user_id"])})
+            bal = int((udoc or {}).get("credits", 0))
             await context.bot.send_message(
                 chat_id=int(dep["user_id"]),
-                text=f"✅ Payment confirmed. {credits} credits added.",
+                text=(
+                    "✅ Deposit approved!\n"
+                    f"• Deposit: ₹{base}\n"
+                    f"• Bonus: +₹{bonus} ({REFERRAL_PERCENT:.1f}%)\n"
+                    f"• Total Credited: ₹{credits}\n"
+                    f"• Balance: {bal} credits"
+                ),
             )
         except Exception:
             pass
 
-        # Referral token award if applicable
+        # Referral earning (3%) to referrer if user was referred
         try:
-            await _notify_referral_award(context=context, repo=repo, referred_user_id=int(dep["user_id"]))
+            await _notify_referral_award(
+                context=context,
+                repo=repo,
+                referred_user_id=int(dep["user_id"]),
+                deposit_amount=int(base),
+                admin_id=int(uid),
+                deposit_id=str(dep_id),
+            )
         except Exception:
             pass
 
@@ -1549,7 +1550,10 @@ async def handle_admin_text(
                 return True
 
             dep_id = st.get("dep_id")
-            credits = int(text)
+            base = int(text)
+            bonus = int(round((base * float(REFERRAL_PERCENT)) / 100.0))
+            credits = base + bonus
+
             dep = await repo.mark_deposit(dep_id, "approved", admin_id=uid, credits_added=credits)
             if not dep:
                 state.pop(uid, None)
@@ -1560,16 +1564,31 @@ async def handle_admin_text(
             state.pop(uid, None)
             await update.message.reply_text("✅ Approved and credits added.")
             try:
+                udoc = await repo.db.users.find_one({"user_id": int(dep["user_id"])})
+                bal = int((udoc or {}).get("credits", 0))
                 await context.bot.send_message(
                     chat_id=int(dep["user_id"]),
-                    text=f"✅ Crypto payment confirmed. {credits} credits added.",
+                    text=(
+                        "✅ Deposit approved!\n"
+                        f"• Deposit: ₹{base}\n"
+                        f"• Bonus: +₹{bonus} ({REFERRAL_PERCENT:.1f}%)\n"
+                        f"• Total Credited: ₹{credits}\n"
+                        f"• Balance: {bal} credits"
+                    ),
                 )
             except Exception:
                 pass
 
-            # Referral token award if applicable
+            # Referral earning to referrer if user was referred
             try:
-                await _notify_referral_award(context=context, repo=repo, referred_user_id=int(dep["user_id"]))
+                await _notify_referral_award(
+                    context=context,
+                    repo=repo,
+                    referred_user_id=int(dep["user_id"]),
+                    deposit_amount=int(base),
+                    admin_id=int(uid),
+                    deposit_id=str(dep_id),
+                )
             except Exception:
                 pass
 
