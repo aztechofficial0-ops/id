@@ -670,7 +670,8 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         flags = await repo.get_inr_qr_flags()
         qr1 = "ON ✅" if flags.get("qr1") else "OFF ❌"
         qr2 = "ON ✅" if flags.get("qr2") else "OFF ❌"
-        text = f"💠 INR QRs\n\nQR 1: {qr1}\nQR 2: {qr2}"
+        qr3 = "ON ✅" if flags.get("qr3") else "OFF ❌"
+        text = f"💠 INR QRs\n\nQR 1: {qr1}\nQR 2: {qr2}\nQR 3: {qr3}"
         await safe_edit(
             query.message,
             text,
@@ -681,6 +682,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
                         InlineKeyboardButton("Toggle QR 1", callback_data="admin:qrs:toggle:qr1"),
                         InlineKeyboardButton("Toggle QR 2", callback_data="admin:qrs:toggle:qr2"),
                     ],
+                    [InlineKeyboardButton("Toggle QR 3", callback_data="admin:qrs:toggle:qr3")],
                     [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
                 ]
             ),
@@ -696,7 +698,8 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         flags = await repo.set_inr_qr_flag(qr_key=qr_key, enabled=new_enabled)
         qr1 = "ON ✅" if flags.get("qr1") else "OFF ❌"
         qr2 = "ON ✅" if flags.get("qr2") else "OFF ❌"
-        text = f"💠 INR QRs\n\nQR 1: {qr1}\nQR 2: {qr2}"
+        qr3 = "ON ✅" if flags.get("qr3") else "OFF ❌"
+        text = f"💠 INR QRs\n\nQR 1: {qr1}\nQR 2: {qr2}\nQR 3: {qr3}"
         await safe_edit(
             query.message,
             text,
@@ -707,6 +710,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
                         InlineKeyboardButton("Toggle QR 1", callback_data="admin:qrs:toggle:qr1"),
                         InlineKeyboardButton("Toggle QR 2", callback_data="admin:qrs:toggle:qr2"),
                     ],
+                    [InlineKeyboardButton("Toggle QR 3", callback_data="admin:qrs:toggle:qr3")],
                     [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
                 ]
             ),
@@ -1403,7 +1407,28 @@ async def handle_admin_text(
                 st["step"] = "tg_password"
                 await update.message.reply_text("Telegram 2FA required. Send Telegram 2FA password:")
                 return True
+
+            if status == "invalid_code":
+                # allow retry
+                st["step"] = "send_code"
+                await update.message.reply_text(
+                    "❌ Invalid OTP code. Send the OTP again (or press Cancel).",
+                    reply_markup=cancel_reply_kb(),
+                )
+                return True
+
+            if status == "code_expired":
+                # must restart login (resend code)
+                await account_manager.admin_cancel_login(uid)
+                state.pop(uid, None)
+                await update.message.reply_text(
+                    "⚠️ OTP expired. Please start again and request a new code.",
+                    reply_markup=main_reply_menu(True),
+                )
+                return True
+
             if status != "ok" or not doc:
+                await account_manager.admin_cancel_login(uid)
                 state.pop(uid, None)
                 await update.message.reply_text("Failed to login. Cancelled.", reply_markup=main_reply_menu(True))
                 return True
@@ -1428,7 +1453,7 @@ async def handle_admin_text(
         if step == "tg_password":
             pwd = text.strip()
             doc, status = await account_manager.admin_complete_password(uid, pwd)
-            if status != "ok" or not doc:
+            if status in {"invalid_password"} or status != "ok" or not doc:
                 # Don't cancel the whole flow; allow retry
                 st["step"] = "tg_password"
                 await update.message.reply_text(
