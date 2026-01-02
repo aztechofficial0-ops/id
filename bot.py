@@ -94,9 +94,14 @@ from config import (
     REPORT_CHANNEL_USERNAME,
     CRYPTO_NETWORKS,
     INR_QRS,
-    REFERRAL_PERCENT,
     START_IMAGE,
 )
+
+# Backward-compatible: if REFERRAL_PERCENT is not present in config.py yet
+try:
+    from config import REFERRAL_PERCENT  # type: ignore
+except Exception:
+    REFERRAL_PERCENT = float(os.getenv("REFERRAL_PERCENT", "3.0"))
 from database import Repo, get_db, init_indexes
 
 # ----------------------------
@@ -1246,15 +1251,15 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         referrals = int(stats.get("referrals", 0))
         earned = float(stats.get("total_earned", 0.0))
         msg = (
-            f"🤝 *Refer & Earn*\n\n"
-            f"Invite friends and earn *{REFERRAL_PERCENT:.1f}%* of their deposits forever!\n\n"
-            f"📊 *Your Stats*\n"
-            f"• 👥 Referrals: *{referrals}*\n"
-            f"• 💰 Total Earned: *₹{earned:.2f}*\n\n"
-            f"🔗 *Your Referral Link*\n"
+            "🤝 Refer & Earn\n\n"
+            f"Invite friends and earn {REFERRAL_PERCENT:.1f}% of their deposits forever!\n\n"
+            "📊 Your Stats\n"
+            f"• 👥 Referrals: {referrals}\n"
+            f"• 💰 Total Earned: ₹{earned:.2f}\n\n"
+            "🔗 Your Referral Link\n"
             f"{_ref_link(uid)}"
         )
-        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_menu(is_admin(uid)))
+        await update.message.reply_text(msg, parse_mode=None, reply_markup=reply_menu(is_admin(uid)))
         return
 
     if text_in == "🆘 Support":
@@ -1444,15 +1449,15 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         referrals = int(stats.get("referrals", 0))
         earned = float(stats.get("total_earned", 0.0))
         text = (
-            f"🤝 *Refer & Earn*\n\n"
-            f"Invite friends and earn *{REFERRAL_PERCENT:.1f}%* of their deposits forever!\n\n"
-            f"📊 *Your Stats*\n"
-            f"• 👥 Referrals: *{referrals}*\n"
-            f"• 💰 Total Earned: *₹{earned:.2f}*\n\n"
-            f"🔗 *Your Referral Link*\n"
+            "🤝 Refer & Earn\n\n"
+            f"Invite friends and earn {REFERRAL_PERCENT:.1f}% of their deposits forever!\n\n"
+            "📊 Your Stats\n"
+            f"• 👥 Referrals: {referrals}\n"
+            f"• 💰 Total Earned: ₹{earned:.2f}\n\n"
+            "🔗 Your Referral Link\n"
             f"{_ref_link(uid)}"
         )
-        await safe_edit(query.message, text, reply_markup=kb([[InlineKeyboardButton("⬅️ Back", callback_data="menu:home")]]), parse_mode=ParseMode.MARKDOWN)
+        await safe_edit(query.message, text, reply_markup=kb([[InlineKeyboardButton("⬅️ Back", callback_data="menu:home")]]), parse_mode=None)
         return
 
     if data == "menu:home":
