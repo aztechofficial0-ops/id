@@ -22,7 +22,10 @@ ADMIN_USER_IDS: List[int] = [
 START_IMAGE = "https://i.postimg.cc/zD73Wn61/photo-2025-12-28-18-55-27.jpg"
 
 # Bot username (without @) for referral links
-BOT_USERNAME = os.getenv("BOT_USERNAME", "DreamAccountbot")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "DreamAccBot")
+
+# Referral program percentage (3% forever)
+REFERRAL_PERCENT = float(os.getenv("REFERRAL_PERCENT", "3.0"))
 
 # Channel join requirement
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "DreamAccountSup")  # without @
@@ -117,5 +120,4 @@ CRYPTO_NETWORKS: Dict[str, CryptoNetworkCfg] = {
         "image_url": "https://i.postimg.cc/VL8sw-XGf/binance.jpg",
     },
 }
-
 
