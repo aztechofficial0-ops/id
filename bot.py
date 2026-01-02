@@ -231,7 +231,7 @@ def reply_menu(is_admin_user: bool) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton("🛒 Buy"), KeyboardButton("💳 Deposit")],
         [KeyboardButton("💰 Balance"), KeyboardButton("📜 History")],
-        [KeyboardButton("🎁 Refer & Earn"), KeyboardButton("🆘 Support")],
+        [KeyboardButton("🤝 Refer & Earn"), KeyboardButton("🆘 Support")],
     ]
     if is_admin_user:
         rows.append([KeyboardButton("🛠 Admin")])
@@ -258,7 +258,7 @@ def main_menu(is_admin: bool) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🆘 Support", url="https://t.me/DreamAccountsupportbot"),
             InlineKeyboardButton("🔎 Find by Credits", callback_data="find:credits"),
         ],
-        [InlineKeyboardButton("🎁 Refer & Earn", callback_data="ref:menu")],
+        [InlineKeyboardButton("🤝 Refer & Earn", callback_data="ref:menu")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("🛠 Admin Panel", callback_data="admin:menu")])
@@ -1241,19 +1241,20 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN, reply_markup=kb([[InlineKeyboardButton("🏠 Menu", callback_data="menu:home")]]))
         return
 
-    if text_in in {"🎁 Refer & Earn", "🎁 Refer & Get Discount"}:
+    if text_in in {"🤝 Refer & Earn", "🎁 Refer & Earn", "🎁 Refer & Get Discount"}:
         stats = await repo.get_referral_stats(uid)
         referrals = int(stats.get("referrals", 0))
         earned = float(stats.get("total_earned", 0.0))
         msg = (
-            f"Invite friends and earn {REFERRAL_PERCENT:.1f}% of their deposits forever!\n"
-            f"Your Stats:\n"
-            f"• Referrals: {referrals}\n"
-            f"• Total Earned: ₹{earned:.2f}\n\n"
-            f"Your Referral Link:\n"
-            f"Share your link: {_ref_link(uid)}"
+            f"🤝 *Refer & Earn*\n\n"
+            f"Invite friends and earn *{REFERRAL_PERCENT:.1f}%* of their deposits forever!\n\n"
+            f"📊 *Your Stats*\n"
+            f"• 👥 Referrals: *{referrals}*\n"
+            f"• 💰 Total Earned: *₹{earned:.2f}*\n\n"
+            f"🔗 *Your Referral Link*\n"
+            f"{_ref_link(uid)}"
         )
-        await update.message.reply_text(msg, parse_mode=None, reply_markup=reply_menu(is_admin(uid)))
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_menu(is_admin(uid)))
         return
 
     if text_in == "🆘 Support":
@@ -1443,14 +1444,15 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         referrals = int(stats.get("referrals", 0))
         earned = float(stats.get("total_earned", 0.0))
         text = (
-            f"Invite friends and earn {REFERRAL_PERCENT:.1f}% of their deposits forever!\n"
-            f"Your Stats:\n"
-            f"• Referrals: {referrals}\n"
-            f"• Total Earned: ₹{earned:.2f}\n\n"
-            f"Your Referral Link:\n"
-            f"Share your link: {_ref_link(uid)}"
+            f"🤝 *Refer & Earn*\n\n"
+            f"Invite friends and earn *{REFERRAL_PERCENT:.1f}%* of their deposits forever!\n\n"
+            f"📊 *Your Stats*\n"
+            f"• 👥 Referrals: *{referrals}*\n"
+            f"• 💰 Total Earned: *₹{earned:.2f}*\n\n"
+            f"🔗 *Your Referral Link*\n"
+            f"{_ref_link(uid)}"
         )
-        await safe_edit(query.message, text, reply_markup=kb([[InlineKeyboardButton("⬅️ Back", callback_data="menu:home")]]), parse_mode=None)
+        await safe_edit(query.message, text, reply_markup=kb([[InlineKeyboardButton("⬅️ Back", callback_data="menu:home")]]), parse_mode=ParseMode.MARKDOWN)
         return
 
     if data == "menu:home":
