@@ -50,9 +50,16 @@ async def init_indexes() -> None:
     await db.deposits.create_index([("user_id", 1), ("created_at", -1)])
     await db.deposits.create_index([("status", 1), ("created_at", -1)])
 
-    # referrals + tokens
+    # referrals
     await db.referrals.create_index([("referred_user_id", 1)], unique=True)
     await db.referrals.create_index([("referrer_user_id", 1), ("created_at", -1)])
+
+    # referral earnings log (optional, for audit)
+    await db.ref_earn_logs.create_index([("referrer_user_id", 1), ("created_at", -1)])
+    await db.ref_earn_logs.create_index([("referred_user_id", 1), ("created_at", -1)])
+    await db.ref_earn_logs.create_index([("deposit_id", 1)], unique=True, sparse=True)
+
+    # legacy tokens (kept for compatibility; no longer used in UI)
     await db.ref_tokens.create_index([("user_id", 1)], unique=True)
 
     # bans
@@ -67,7 +74,7 @@ class Repo:
         self.db = db
 
     # ----------------------------
-    # Referral / tokens
+    # Referral / earnings
     # ----------------------------
     async def is_new_user(self, user_id: int) -> bool:
         doc = await self.db.users.find_one({"user_id": int(user_id)})
@@ -121,8 +128,63 @@ class Repo:
         return True
 
     async def get_tokens(self, user_id: int) -> int:
+        # legacy (discount tokens) - no longer used by referral UI
         doc = await self.db.ref_tokens.find_one({"user_id": int(user_id)})
         return int((doc or {}).get("tokens", 0))
+
+    async def get_referral_stats(self, user_id: int) -> dict[str, Any]:
+        """Return {'referrals': int, 'total_earned': float} for a referrer."""
+        referrals = await self.db.referrals.count_documents({"referrer_user_id": int(user_id)})
+        u = await self.db.users.find_one({"user_id": int(user_id)})
+        total_earned = float((u or {}).get("ref_earned_total", 0.0) or 0.0)
+        return {"referrals": int(referrals), "total_earned": float(total_earned)}
+
+    async def add_referral_earning(
+        self,
+        *,
+        referrer_user_id: int,
+        referred_user_id: int,
+        amount: float,
+        by_admin: int,
+        deposit_id: str | None = None,
+        deposit_amount: int | None = None,
+    ) -> dict[str, Any]:
+        """Credit referral earning to referrer (adds to credits + tracks total earned).
+
+        Returns updated user doc for referrer.
+        """
+        now = utcnow()
+        amt_i = int(amount)
+        # add to credits as integer credits, and track total earned as float
+        user = await self.db.users.find_one_and_update(
+            {"user_id": int(referrer_user_id)},
+            {
+                "$inc": {"credits": amt_i, "ref_earned_total": float(amount)},
+                "$setOnInsert": {"user_id": int(referrer_user_id), "created_at": now},
+                "$set": {"updated_at": now},
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+
+        # best-effort audit log
+        try:
+            await self.db.ref_earn_logs.insert_one(
+                {
+                    "referrer_user_id": int(referrer_user_id),
+                    "referred_user_id": int(referred_user_id),
+                    "amount": float(amount),
+                    "amount_int": amt_i,
+                    "deposit_id": deposit_id,
+                    "deposit_amount": int(deposit_amount) if deposit_amount is not None else None,
+                    "by_admin": int(by_admin),
+                    "created_at": now,
+                }
+            )
+        except Exception:
+            pass
+
+        return user or {}
 
     async def _reserve_token(self, user_id: int) -> bool:
         """Reserve one token for a purchase (decrement immediately)."""
