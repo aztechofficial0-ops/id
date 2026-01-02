@@ -190,17 +190,18 @@ class Repo:
     # QR settings
     # ----------------------------
     async def get_inr_qr_flags(self) -> dict[str, bool]:
-        """Return {'qr1': bool, 'qr2': bool}. Defaults to both True."""
+        """Return {'qr1': bool, 'qr2': bool, 'qr3': bool}. Defaults to all True."""
         doc = await self.db.qr_settings.find_one({"key": "inr"})
         if not doc:
-            return {"qr1": True, "qr2": True}
+            return {"qr1": True, "qr2": True, "qr3": True}
         return {
             "qr1": bool(doc.get("qr1", True)),
             "qr2": bool(doc.get("qr2", True)),
+            "qr3": bool(doc.get("qr3", True)),
         }
 
     async def set_inr_qr_flag(self, *, qr_key: str, enabled: bool) -> dict[str, bool]:
-        if qr_key not in {"qr1", "qr2"}:
+        if qr_key not in {"qr1", "qr2", "qr3"}:
             return await self.get_inr_qr_flags()
         await self.db.qr_settings.update_one(
             {"key": "inr"},
