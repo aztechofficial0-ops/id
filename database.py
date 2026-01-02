@@ -68,10 +68,91 @@ async def init_indexes() -> None:
     # qr settings
     await db.qr_settings.create_index([("key", 1)], unique=True)
 
+    # admin settings (bulk discount etc.)
+    await db.admin_settings.create_index([("key", 1)], unique=True)
+
 
 class Repo:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
+
+    # -------- Admin Settings (Bulk Discount) --------
+    async def get_bulk_discount(self) -> dict[str, Any]:
+        """Return {'enabled': bool, 'percent': int}."""
+        doc = await self.db.admin_settings.find_one({"key": "bulk_discount"})
+        if not doc:
+            return {"enabled": False, "percent": 0}
+        return {"enabled": bool(doc.get("enabled", False)), "percent": int(doc.get("percent", 0) or 0)}
+
+    async def set_bulk_discount(self, *, enabled: bool, percent: int) -> dict[str, Any]:
+        percent_i = int(percent)
+        await self.db.admin_settings.update_one(
+            {"key": "bulk_discount"},
+            {"$set": {"key": "bulk_discount", "enabled": bool(enabled), "percent": percent_i, "updated_at": utcnow()}},
+            upsert=True,
+        )
+        return await self.get_bulk_discount()
+
+    async def apply_bulk_discount(self, *, percent: int) -> dict[str, Any]:
+        """Apply discount percent to ALL AVAILABLE accounts.
+
+        Stores original base price in 'base_price' (only once) so it can be reset.
+        """
+        p = max(0, min(95, int(percent)))
+
+        # Ensure base_price is saved (only if missing)
+        await self.db.accounts.update_many(
+            {"status": "available", "price": {"$ne": None}, "base_price": {"$exists": False}},
+            [{"$set": {"base_price": "$price"}}],
+        )
+
+        # Apply discount based on base_price
+        await self.db.accounts.update_many(
+            {"status": "available", "base_price": {"$ne": None}},
+            [
+                {
+                    "$set": {
+                        "price": {
+                            "$toInt": {
+                                "$round": [
+                                    {
+                                        "$multiply": [
+                                            "$base_price",
+                                            {"$divide": [{"$subtract": [100, p]}, 100]},
+                                        ]
+                                    },
+                                    0,
+                                ]
+                            }
+                        },
+                        "updated_at": "$$NOW",
+                    }
+                }
+            ],
+        )
+
+        return await self.set_bulk_discount(enabled=True, percent=p)
+
+    async def disable_bulk_discount(self) -> dict[str, Any]:
+        """Disable discount and restore price from base_price (keeps base_price)."""
+        await self.db.accounts.update_many(
+            {"status": "available", "base_price": {"$ne": None}},
+            [{"$set": {"price": "$base_price", "updated_at": "$$NOW"}}],
+        )
+        st = await self.get_bulk_discount()
+        return await self.set_bulk_discount(enabled=False, percent=int(st.get("percent", 0) or 0))
+
+    async def reset_bulk_discount(self) -> dict[str, Any]:
+        """Reset to normal (restore price and remove base_price field)."""
+        await self.db.accounts.update_many(
+            {"status": "available", "base_price": {"$exists": True}},
+            [{"$set": {"price": "$base_price", "updated_at": "$$NOW"}}],
+        )
+        await self.db.accounts.update_many(
+            {"status": "available", "base_price": {"$exists": True}},
+            {"$unset": {"base_price": ""}},
+        )
+        return await self.set_bulk_discount(enabled=False, percent=0)
 
     # ----------------------------
     # Referral / earnings
