@@ -94,6 +94,7 @@ from config import (
     REPORT_CHANNEL_USERNAME,
     CRYPTO_NETWORKS,
     INR_QRS,
+    REFERRAL_PERCENT,
     START_IMAGE,
 )
 from database import Repo, get_db, init_indexes
@@ -230,7 +231,7 @@ def reply_menu(is_admin_user: bool) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton("🛒 Buy"), KeyboardButton("💳 Deposit")],
         [KeyboardButton("💰 Balance"), KeyboardButton("📜 History")],
-        [KeyboardButton("🎁 Refer & Get Discount"), KeyboardButton("🆘 Support")],
+        [KeyboardButton("🎁 Refer & Earn"), KeyboardButton("🆘 Support")],
     ]
     if is_admin_user:
         rows.append([KeyboardButton("🛠 Admin")])
@@ -257,7 +258,7 @@ def main_menu(is_admin: bool) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🆘 Support", url="https://t.me/DreamAccountsupportbot"),
             InlineKeyboardButton("🔎 Find by Credits", callback_data="find:credits"),
         ],
-        [InlineKeyboardButton("🎁 Refer & Get Discount", callback_data="ref:menu")],
+        [InlineKeyboardButton("🎁 Refer & Earn", callback_data="ref:menu")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton("🛠 Admin Panel", callback_data="admin:menu")])
@@ -785,7 +786,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     )
                     if saved:
                         await update.message.reply_text(
-                            f"✅ You were referred by user: {referrer_id}\n\nPlease complete your first deposit (after joining channels). Once admin approves it, your referrer will receive 1 token (-5 credits for 1 purchase).\n\nYour referral link:\n{_ref_link(uid)}",
+                            f"✅ You were referred by user: {referrer_id}\n\nInvite friends and earn {REFERRAL_PERCENT:.1f}% of their deposits forever!\n\nYour Referral Link:\n{_ref_link(uid)}",
                             parse_mode=None,
                         )
     except Exception:
@@ -1240,17 +1241,17 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN, reply_markup=kb([[InlineKeyboardButton("🏠 Menu", callback_data="menu:home")]]))
         return
 
-    if text_in == "🎁 Refer & Get Discount":
-        tokens = await repo.get_tokens(uid)
+    if text_in in {"🎁 Refer & Earn", "🎁 Refer & Get Discount"}:
+        stats = await repo.get_referral_stats(uid)
+        referrals = int(stats.get("referrals", 0))
+        earned = float(stats.get("total_earned", 0.0))
         msg = (
-            "🎁 Refer & Get Discount\n\n"
-            f"Tokens available: {tokens}\n"
-            "Discount: -5 credits for 1 purchase per token\n\n"
-            "How it works:\n"
-            f"1) Share your link: {_ref_link(uid)}\n"
-            "2) Referral counts only for NEW users\n"
-            "3) Token is added only after referred user's FIRST deposit is approved\n"
-            "4) Each token gives -5 credits discount for 1 purchase\n"
+            f"Invite friends and earn {REFERRAL_PERCENT:.1f}% of their deposits forever!\n"
+            f"Your Stats:\n"
+            f"• Referrals: {referrals}\n"
+            f"• Total Earned: ₹{earned:.2f}\n\n"
+            f"Your Referral Link:\n"
+            f"Share your link: {_ref_link(uid)}"
         )
         await update.message.reply_text(msg, parse_mode=None, reply_markup=reply_menu(is_admin(uid)))
         return
@@ -1438,15 +1439,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # Home (Back button)
     if data == "ref:menu":
         await safe_query_answer(query, cache_time=0)
-        tokens = await repo.get_tokens(uid)
+        stats = await repo.get_referral_stats(uid)
+        referrals = int(stats.get("referrals", 0))
+        earned = float(stats.get("total_earned", 0.0))
         text = (
-            "🎁 Refer & Get Discount\n\n"
-            f"Tokens available: {tokens}\n"
-            "Discount: -5 credits for 1 purchase per token\n\n"
-            "How it works:\n"
-            "• Share your link: " + _ref_link(uid) + "\n"
-            "• Referral counts only for NEW users\n"
-            "• Token is added only after referred user's FIRST deposit is approved\n"
+            f"Invite friends and earn {REFERRAL_PERCENT:.1f}% of their deposits forever!\n"
+            f"Your Stats:\n"
+            f"• Referrals: {referrals}\n"
+            f"• Total Earned: ₹{earned:.2f}\n\n"
+            f"Your Referral Link:\n"
+            f"Share your link: {_ref_link(uid)}"
         )
         await safe_edit(query.message, text, reply_markup=kb([[InlineKeyboardButton("⬅️ Back", callback_data="menu:home")]]), parse_mode=None)
         return
