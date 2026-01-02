@@ -118,3 +118,4 @@ CRYPTO_NETWORKS: Dict[str, CryptoNetworkCfg] = {
     },
 }
 
+
