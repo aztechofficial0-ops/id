@@ -14,7 +14,12 @@ if BASE_DIR not in sys.path:
 
 from bson import ObjectId
 from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import RPCError, SessionPasswordNeededError
+from telethon.errors.rpcerrorlist import (
+    PasswordHashInvalidError,
+    PhoneCodeExpiredError,
+    PhoneCodeInvalidError,
+)
 from telethon.sessions import StringSession
 try:
     from telegram import (
@@ -492,8 +497,17 @@ class AccountManager:
 
         try:
             await pending.client.sign_in(phone=pending.phone, code=code)
+        except PhoneCodeInvalidError:
+            # Keep pending login so admin can retry
+            return None, "invalid_code"
+        except PhoneCodeExpiredError:
+            # Code expired; require restarting login flow (resend code)
+            return None, "code_expired"
         except SessionPasswordNeededError:
             return None, "need_password"
+        except Exception:
+            logging.exception("admin_complete_code failed")
+            return None, "error"
 
         me = await pending.client.get_me()
         session_string = pending.client.session.save()
@@ -515,7 +529,23 @@ class AccountManager:
         if not pending:
             return None, "no_pending"
 
-        await pending.client.sign_in(password=password)
+        try:
+            await pending.client.sign_in(password=password)
+        except PasswordHashInvalidError:
+            # Keep pending login so admin can retry
+            return None, "invalid_password"
+        except RPCError as e:
+            # Telethon versions may raise different PasswordHashInvalidError classes
+            if e.__class__.__name__ == "PasswordHashInvalidError":
+                return None, "invalid_password"
+            logging.exception("admin_complete_password RPCError")
+            return None, "error"
+        except Exception as e:
+            if e.__class__.__name__ == "PasswordHashInvalidError":
+                return None, "invalid_password"
+            logging.exception("admin_complete_password failed")
+            return None, "error"
+
         me = await pending.client.get_me()
         session_string = pending.client.session.save()
         doc = {
@@ -1528,9 +1558,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             qr_buttons.append(InlineKeyboardButton("QR 1", callback_data="dep:inrqr:qr1"))
         if flags.get("qr2"):
             qr_buttons.append(InlineKeyboardButton("QR 2", callback_data="dep:inrqr:qr2"))
+        if flags.get("qr3"):
+            qr_buttons.append(InlineKeyboardButton("QR 3", callback_data="dep:inrqr:qr3"))
 
         rows: list[list[InlineKeyboardButton]] = []
-        if len(qr_buttons) == 2:
+        if len(qr_buttons) == 3:
+            rows.append([qr_buttons[0], qr_buttons[1]])
+            rows.append([qr_buttons[2]])
+        elif len(qr_buttons) == 2:
             rows.append(qr_buttons)
         else:
             rows.append([qr_buttons[0]])
