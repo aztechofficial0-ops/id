@@ -254,6 +254,7 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton("💠 QRs", callback_data="admin:qrs"),
                 InlineKeyboardButton("🎁 Referrals", callback_data="admin:referrals:0"),
+                InlineKeyboardButton("🏷️ Bulk Discount", callback_data="admin:bulkdiscount"),
             ],
             [
                 InlineKeyboardButton("🚫 Ban System", callback_data="admin:banmenu"),
@@ -498,6 +499,125 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         return True
 
     # Sessions handlers removed (all admin:sessions:* callbacks now ignored)
+
+    if data == "admin:bulkdiscount":
+        await query.answer(cache_time=0)
+        await restore_main_reply_menu(query.message)
+        st = await repo.get_bulk_discount()
+        enabled = bool(st.get("enabled"))
+        percent = int(st.get("percent", 0) or 0)
+        status_txt = "ON ✅" if enabled else "OFF ❌"
+        text = (
+            "🏷️ Bulk Price Discount\n\n"
+            f"Status: {status_txt}\n"
+            f"Discount: {percent}%\n\n"
+            "Applies to ALL available accounts.\n"
+            "Use Set % to change discount amount."
+        )
+        await safe_edit(
+            query.message,
+            text,
+            parse_mode=None,
+            reply_markup=kb(
+                [
+                    [InlineKeyboardButton("✏️ Set %", callback_data="admin:bulkdiscount:set")],
+                    [
+                        InlineKeyboardButton(
+                            "⛔ Turn OFF" if enabled else "✅ Turn ON",
+                            callback_data="admin:bulkdiscount:off" if enabled else "admin:bulkdiscount:on",
+                        )
+                    ],
+                    [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
+                ]
+            ),
+        )
+        return True
+
+    if data == "admin:bulkdiscount:on":
+        await query.answer(cache_time=0)
+        await restore_main_reply_menu(query.message)
+        st = await repo.get_bulk_discount()
+        percent = int(st.get("percent", 0) or 0)
+        await repo.apply_bulk_discount(percent=percent)
+        await query.answer("✅ Discount turned ON", show_alert=True)
+
+        # Re-render screen (like QRs toggle)
+        st2 = await repo.get_bulk_discount()
+        enabled2 = bool(st2.get("enabled"))
+        percent2 = int(st2.get("percent", 0) or 0)
+        status_txt2 = "ON ✅" if enabled2 else "OFF ❌"
+        text2 = (
+            "🏷️ Bulk Price Discount\n\n"
+            f"Status: {status_txt2}\n"
+            f"Discount: {percent2}%\n\n"
+            "Applies to ALL available accounts.\n"
+            "Use Set % to change discount amount."
+        )
+        await safe_edit(
+            query.message,
+            text2,
+            parse_mode=None,
+            reply_markup=kb(
+                [
+                    [InlineKeyboardButton("✏️ Set %", callback_data="admin:bulkdiscount:set")],
+                    [
+                        InlineKeyboardButton(
+                            "⛔ Turn OFF" if enabled2 else "✅ Turn ON",
+                            callback_data="admin:bulkdiscount:off" if enabled2 else "admin:bulkdiscount:on",
+                        )
+                    ],
+                    [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
+                ]
+            ),
+        )
+        return True
+
+    if data == "admin:bulkdiscount:off":
+        await query.answer(cache_time=0)
+        await restore_main_reply_menu(query.message)
+        await repo.disable_bulk_discount()
+        await query.answer("⛔ Discount turned OFF", show_alert=True)
+
+        # Re-render screen (like QRs toggle)
+        st2 = await repo.get_bulk_discount()
+        enabled2 = bool(st2.get("enabled"))
+        percent2 = int(st2.get("percent", 0) or 0)
+        status_txt2 = "ON ✅" if enabled2 else "OFF ❌"
+        text2 = (
+            "🏷️ Bulk Price Discount\n\n"
+            f"Status: {status_txt2}\n"
+            f"Discount: {percent2}%\n\n"
+            "Applies to ALL available accounts.\n"
+            "Use Set % to change discount amount."
+        )
+        await safe_edit(
+            query.message,
+            text2,
+            parse_mode=None,
+            reply_markup=kb(
+                [
+                    [InlineKeyboardButton("✏️ Set %", callback_data="admin:bulkdiscount:set")],
+                    [
+                        InlineKeyboardButton(
+                            "⛔ Turn OFF" if enabled2 else "✅ Turn ON",
+                            callback_data="admin:bulkdiscount:off" if enabled2 else "admin:bulkdiscount:on",
+                        )
+                    ],
+                    [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
+                ]
+            ),
+        )
+        return True
+
+    if data == "admin:bulkdiscount:set":
+        await query.answer(cache_time=0)
+        await restore_main_reply_menu(query.message)
+        state[uid] = {"flow": "admin_bulkdiscount", "step": "percent"}
+        await query.message.reply_text(
+            "🏷️ Bulk Price Discount\n\nSend discount percent (0-95).\nExample: 20\n\nType Cancel to stop.",
+            reply_markup=cancel_reply_kb(),
+        )
+        return True
 
     if data == "admin:qrs":
         await query.answer(cache_time=0)
@@ -1139,6 +1259,7 @@ async def handle_admin_text(
         "admin_dep_setcredits",
         "admin_tokenedit",
         "admin_ban",
+        "admin_bulkdiscount",
     }:
         return False
 
@@ -1154,6 +1275,35 @@ async def handle_admin_text(
         state.pop(uid, None)
         await update.message.reply_text("Cancelled.", reply_markup=main_reply_menu(True))
         return True
+
+    # ----- bulk discount -----
+    if flow == "admin_bulkdiscount":
+        if step == "percent":
+            if not text.isdigit():
+                await update.message.reply_text("Send a number between 0 and 95 (example 20):")
+                return True
+            p = int(text)
+            if p < 0 or p > 95:
+                await update.message.reply_text("Percent must be 0-95. Send again:")
+                return True
+
+            try:
+                await repo.apply_bulk_discount(percent=p)
+            except Exception as e:
+                state.pop(uid, None)
+                await update.message.reply_text(
+                    f"❌ Failed to apply discount: {e}",
+                    reply_markup=main_reply_menu(True),
+                )
+                return True
+
+            state.pop(uid, None)
+            st2 = await repo.get_bulk_discount()
+            await update.message.reply_text(
+                f"✅ Bulk discount updated successfully!\n\nStatus: {'ON ✅' if st2.get('enabled') else 'OFF ❌'}\nDiscount: {int(st2.get('percent', 0) or 0)}%",
+                reply_markup=main_reply_menu(True),
+            )
+            return True
 
     # ----- add account -----
     if flow == "admin_add_account":
