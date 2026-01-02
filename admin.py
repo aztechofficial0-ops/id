@@ -187,7 +187,15 @@ def deposits_keyboard(
       rows.append([InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")])
       return kb(rows)
 
-from config import ADMIN_USER_IDS, TELEGRAM_API_ID, TELEGRAM_API_HASH, BOT_USERNAME, REFERRAL_PERCENT
+from config import ADMIN_USER_IDS, TELEGRAM_API_ID, TELEGRAM_API_HASH, BOT_USERNAME
+
+# Backward-compatible: if REFERRAL_PERCENT is not present in config.py yet
+try:
+    from config import REFERRAL_PERCENT  # type: ignore
+except Exception:
+    import os
+
+    REFERRAL_PERCENT = float(os.getenv("REFERRAL_PERCENT", "3.0"))
 from database import Repo, get_db
 
 
@@ -242,7 +250,6 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton("💳 Deposits", callback_data="admin:deposits"),
                 InlineKeyboardButton("💰 Active Credits", callback_data="admin:activecredits:0"),
-                InlineKeyboardButton("📱 Sessions", callback_data="admin:sessions"),
             ],
             [
                 InlineKeyboardButton("💠 QRs", callback_data="admin:qrs"),
@@ -323,6 +330,10 @@ def account_detail_keyboard(account_id: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("✏️ Edit", callback_data=f"admin:account:edit:{account_id}"),
                 InlineKeyboardButton("🗑 Delete", callback_data=f"admin:account:delete:{account_id}"),
             ],
+            [
+                InlineKeyboardButton("🛠️ Manage Devices", callback_data=f"dev:menu:{account_id}"),
+                InlineKeyboardButton("📱 Get OTP", callback_data=f"admin:account:getotp:{account_id}"),
+            ],
             [InlineKeyboardButton("⬅️ Back", callback_data="admin:accounts")],
         ]
     )
@@ -351,65 +362,7 @@ def active_credits_keyboard(page: int, has_prev: bool, has_next: bool) -> Inline
     return kb(rows)
 
 
-def _sessions_result_key(admin_id: int) -> str:
-    return f"sessions_check:{int(admin_id)}"
-
-
-def _sessions_main_kb() -> InlineKeyboardMarkup:
-    return kb(
-        [
-            [InlineKeyboardButton("✅ Run Active Checkup", callback_data="admin:sessions:run")],
-            [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
-        ]
-    )
-
-
-def _sessions_tabs_kb(*, active_count: int, inactive_count: int) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = [
-        [
-            InlineKeyboardButton(f"🟢 Active ({active_count})", callback_data="admin:sessions:active:0"),
-            InlineKeyboardButton(f"🔴 Inactive ({inactive_count})", callback_data="admin:sessions:inactive:0"),
-        ]
-    ]
-    if inactive_count > 0:
-        rows.append([InlineKeyboardButton("🗑 Remove ALL Inactive", callback_data="admin:sessions:purge")])
-    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")])
-    return kb(rows)
-
-
-def _sessions_list_kb(kind: str, page: int, *, has_prev: bool, has_next: bool) -> InlineKeyboardMarkup:
-    nav: list[InlineKeyboardButton] = []
-    if has_prev:
-        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"admin:sessions:{kind}:{page-1}"))
-    if has_next:
-        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"admin:sessions:{kind}:{page+1}"))
-
-    rows: list[list[InlineKeyboardButton]] = []
-    if nav:
-        rows.append(nav)
-    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="admin:sessions")])
-    return kb(rows)
-
-
-async def _check_session_valid(account: dict[str, Any]) -> bool:
-    """Return True if session can connect and get_me() without auth errors."""
-    client = TelegramClient(
-        StringSession(account.get("session_string") or ""),
-        int(account.get("api_id")),
-        str(account.get("api_hash")),
-    )
-    try:
-        await client.connect()
-        # get_me is a good quick validity check
-        await asyncio.wait_for(client.get_me(), timeout=12)
-        return True
-    except Exception:
-        return False
-    finally:
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
+# Sessions helper functions removed
 
 
 async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, state: Dict[int, Dict[str, Any]]) -> bool:
@@ -544,134 +497,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return True
 
-    if data == "admin:sessions":
-        await query.answer(cache_time=0)
-        await restore_main_reply_menu(query.message)
-        await safe_edit(
-            query.message,
-            "📱 Sessions\n\nOnly AVAILABLE accounts are checked.\nClick 'Run Active Checkup' to validate sessions.",
-            parse_mode=None,
-            reply_markup=_sessions_main_kb(),
-        )
-        return True
-
-    if data == "admin:sessions:run":
-        await query.answer(cache_time=0)
-        await restore_main_reply_menu(query.message)
-        await safe_edit(
-            query.message,
-            "⏳ Checking sessions... Please wait.",
-            parse_mode=None,
-            reply_markup=kb([[InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")]]),
-        )
-
-        db = get_db()
-        accounts = await db.accounts.find({"status": "available"}).to_list(length=10000)
-
-        sem = asyncio.Semaphore(10)
-        active: list[str] = []
-        inactive: list[str] = []
-        inactive_ids: list[str] = []
-
-        async def _one(acc: dict[str, Any]):
-            async with sem:
-                ok = await _check_session_valid(acc)
-                phone = str(acc.get("phone", ""))
-                if ok:
-                    active.append(phone)
-                else:
-                    inactive.append(phone)
-                    inactive_ids.append(str(acc.get("_id")))
-
-        await asyncio.gather(*[_one(a) for a in accounts])
-        active.sort()
-        inactive.sort()
-
-        context.application.bot_data[_sessions_result_key(uid)] = {
-            "active": active,
-            "inactive": inactive,
-            "inactive_ids": inactive_ids,
-        }
-
-        await safe_edit(
-            query.message,
-            f"✅ Checkup completed.\n\nValid: {len(active)}\nInvalid: {len(inactive)}",
-            parse_mode=None,
-            reply_markup=_sessions_tabs_kb(active_count=len(active), inactive_count=len(inactive)),
-        )
-        return True
-
-    if data.startswith("admin:sessions:active:") or data.startswith("admin:sessions:inactive:"):
-        await query.answer(cache_time=0)
-        await restore_main_reply_menu(query.message)
-
-        parts = data.split(":")
-        kind = parts[2]
-        page = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
-
-        res = context.application.bot_data.get(_sessions_result_key(uid))
-        if not res:
-            await safe_edit(query.message, "No checkup results yet. Run checkup first.", parse_mode=None, reply_markup=_sessions_main_kb())
-            return True
-
-        items = res.get(kind, [])
-        page_size = 10
-        total = len(items)
-        max_page = max(0, (total - 1) // page_size) if total else 0
-        if page > max_page:
-            page = max_page
-        start = page * page_size
-        chunk = items[start : start + page_size]
-
-        lines = [
-            f"{'🟢 Active' if kind == 'active' else '🔴 Inactive'} Sessions",
-            "",
-            f"Page {page + 1}/{max_page + 1 if total else 1}",
-            "",
-        ]
-        if not chunk:
-            lines.append("No records.")
-        else:
-            for p in chunk:
-                lines.append(f"• +{p}")
-
-        await safe_edit(
-            query.message,
-            "\n".join(lines),
-            parse_mode=None,
-            reply_markup=_sessions_list_kb(kind, page, has_prev=page > 0, has_next=page < max_page),
-        )
-        return True
-
-    if data == "admin:sessions:purge":
-        await query.answer(cache_time=0)
-        res = context.application.bot_data.get(_sessions_result_key(uid))
-        if not res:
-            await safe_edit(query.message, "No checkup results yet. Run checkup first.", parse_mode=None, reply_markup=_sessions_main_kb())
-            return True
-
-        inactive_ids = res.get("inactive_ids", [])
-        if not inactive_ids:
-            await safe_edit(
-                query.message,
-                "No inactive accounts to remove.",
-                parse_mode=None,
-                reply_markup=_sessions_tabs_kb(active_count=len(res.get('active', [])), inactive_count=0),
-            )
-            return True
-
-        await safe_edit(
-            query.message,
-            f"⚠️ Confirm delete\n\nThis will PERMANENTLY delete {len(inactive_ids)} inactive accounts from MongoDB.",
-            parse_mode=None,
-            reply_markup=kb(
-                [
-                    [InlineKeyboardButton("✅ Yes, delete", callback_data="admin:sessions:purge_confirm")],
-                    [InlineKeyboardButton("❌ Cancel", callback_data="admin:sessions")],
-                ]
-            ),
-        )
-        return True
+    # Sessions handlers removed (all admin:sessions:* callbacks now ignored)
 
     if data == "admin:qrs":
         await query.answer(cache_time=0)
@@ -849,42 +675,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await safe_edit(query.message, "\n".join(lines), parse_mode=None, reply_markup=kb(nav))
         return True
 
-    if data == "admin:sessions:purge_confirm":
-        await query.answer(cache_time=0)
-        await restore_main_reply_menu(query.message)
-
-        res = context.application.bot_data.get(_sessions_result_key(uid))
-        if not res:
-            await safe_edit(query.message, "No checkup results yet. Run checkup first.", parse_mode=None, reply_markup=_sessions_main_kb())
-            return True
-
-        inactive_ids = res.get("inactive_ids", [])
-        db = get_db()
-        oids: list[ObjectId] = []
-        for s in inactive_ids:
-            try:
-                oids.append(ObjectId(s))
-            except Exception:
-                pass
-
-        if not oids:
-            await safe_edit(query.message, "No valid inactive IDs found.", parse_mode=None, reply_markup=_sessions_main_kb())
-            return True
-
-        del_res = await db.accounts.delete_many({"_id": {"$in": oids}})
-
-        # refresh results
-        res["inactive"] = []
-        res["inactive_ids"] = []
-        context.application.bot_data[_sessions_result_key(uid)] = res
-
-        await safe_edit(
-            query.message,
-            f"🗑 Deleted {del_res.deleted_count} inactive accounts from stock.",
-            parse_mode=None,
-            reply_markup=_sessions_tabs_kb(active_count=len(res.get('active', [])), inactive_count=0),
-        )
-        return True
+    # admin:sessions:purge_confirm removed
 
     if data.startswith("admin:activecredits:"):
         # admin:activecredits:<page>
@@ -1030,6 +821,16 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     if data.startswith("admin:account:view:"):
         acc_id = data.split(":", 3)[3]
+
+        # Stop OTP monitoring if this admin was monitoring this account
+        try:
+            account_manager: AccountManager = context.application.bot_data["account_manager"]
+            oid = ObjectId(acc_id)
+            if account_manager.get_admin_monitor(oid) == int(uid):
+                account_manager.stop_admin_monitor(oid)
+        except Exception:
+            pass
+
         acc = await repo.get_account(ObjectId(acc_id))
         if not acc:
             await query.answer("❌ Account not found.", show_alert=True)
@@ -1090,6 +891,58 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             "Or type `cancel`.",
             parse_mode=ParseMode.MARKDOWN,
         )
+        return True
+
+    if data.startswith("admin:account:getotp:"):
+        await query.answer(cache_time=0)
+        acc_id_s = data.split(":", 3)[3]
+        try:
+            account_id = ObjectId(acc_id_s)
+        except Exception:
+            await query.answer("Invalid account ID.", show_alert=True)
+            return True
+
+        acc = await repo.get_account(account_id)
+        if not acc:
+            await query.answer("Account not found.", show_alert=True)
+            return True
+
+        phone = acc.get("phone") or ""
+        twofa = (acc.get("twofa_password") or "").strip()
+        twofa_line = f"\n🔒 2FA: `{twofa}`" if twofa else "\n🔒 2FA: Not set"
+
+        # Start monitoring (replace any existing monitor)
+        account_manager: AccountManager = context.application.bot_data["account_manager"]
+        account_manager.start_admin_monitor(account_id, uid)
+
+        # Ensure session connected (admin monitor mode: do NOT mark admin as buyer)
+        try:
+            await account_manager.ensure_connected_for_admin_monitor(account_id, acc)
+        except Exception as e:
+            await query.answer(f"Failed to connect session: {e}", show_alert=True)
+            account_manager.stop_admin_monitor(account_id)
+            return True
+
+        await safe_edit(
+            query.message,
+            f"📱 Get OTP\n\n"
+            f"Phone: +{phone}{twofa_line}\n\n"
+            f"✅ OTP forwarding started.\n"
+            f"I will forward any OTP received in this chat.",
+
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=kb(
+                [
+                    [InlineKeyboardButton("🔄 Retry OTP", callback_data=f"admin:account:getotp:{acc_id_s}")],
+                    [InlineKeyboardButton("⬅️ Back", callback_data=f"admin:account:view:{acc_id_s}")],
+                ]
+            ),
+        )
+        return True
+
+    # Cancel removed; use Retry button or Back (stops monitor automatically)
+    if data.startswith("admin:account:getotp:cancel:"):
+        await query.answer(cache_time=0)
         return True
 
     # Deposit details / resend screenshot
