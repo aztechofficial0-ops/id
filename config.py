@@ -75,6 +75,13 @@ INR_QRS: Dict[str, PaymentMethodCfg] = {
         "notes": "REGARDS :- @BrutodGIFT\n\nCHECK USERNAME BEFORE DEAL",
         "image_url": "https://i.postimg.cc/JnLgPsf3/inr2.jpg",
     },
+    "qr3": {
+        "label": "FamPay Auto QR",
+        "payee_name": "MOHAMMED AYAZ AHMED",
+        "upi_id": "ayazahmedmd@fam",
+        "notes": "REGARDS :- @AzTechDeveloper\n\nCHECK USERNAME BEFORE DEAL",
+        "image_url": "https://i.postimg.cc/y8mH5kF6/fampay.jpg",
+    },
 }
 
 # Backwards compatibility (some code may still reference INR_PAYMENT)
