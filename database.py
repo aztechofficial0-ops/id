@@ -725,74 +725,92 @@ class Repo:
     async def buy_account_filtered(
         self, *, user_id: int, username: str | None, country: str, year: Any
     ) -> tuple[Optional[dict[str, Any]], str]:
+        """Buy one account for (country, year) that the user can afford.
+
+        This intentionally picks the cheapest available account within the user's budget.
+        If the user has discount tokens, it will first try using a token (allows buying
+        up to credits+5 because charge = price-5).
+        """
         now = utcnow()
         user = await self.ensure_user(user_id)
+        credits = int((user or {}).get("credits", 0) or 0)
 
-        q: dict[str, Any] = {"status": "available", "country": country}
+        base_q: dict[str, Any] = {"status": "available", "country": country, "price": {"$ne": None}}
         if year is not None:
-            q["year"] = year
+            base_q["year"] = year
 
-        account = await self.db.accounts.find_one_and_update(
-            q,
-            {
-                "$set": {
-                    "status": "assigned",
-                    "assigned_to": int(user_id),
-                    "sold_to_user_id": int(user_id),
-                    "sold_to_username": (username or ""),
-                    "assigned_at": now,
-                    "updated_at": now,
+        # Try with token first (if available), then without token.
+        for want_token in (True, False):
+            token_used = False
+            max_price = credits
+
+            if want_token:
+                token_used = await self._reserve_token(user_id)
+                if not token_used:
+                    continue
+                max_price = credits + 5
+
+            q = dict(base_q)
+            q["price"] = {"$ne": None, "$lte": int(max_price)}
+
+            account = await self.db.accounts.find_one_and_update(
+                q,
+                {
+                    "$set": {
+                        "status": "assigned",
+                        "assigned_to": int(user_id),
+                        "sold_to_user_id": int(user_id),
+                        "sold_to_username": (username or ""),
+                        "assigned_at": now,
+                        "updated_at": now,
+                    }
+                },
+                # cheapest first
+                sort=[("price", 1), ("created_at", 1)],
+                return_document=ReturnDocument.AFTER,
+            )
+
+            if not account:
+                if token_used:
+                    await self._release_token(user_id)
+                continue
+
+            original_price = int(account.get("price") or 0)
+            charge = max(0, original_price - 5) if token_used else original_price
+
+            dec = await self.db.users.update_one(
+                {"user_id": int(user_id), "credits": {"$gte": int(charge)}},
+                {"$inc": {"credits": -int(charge)}, "$set": {"updated_at": now}},
+            )
+            if dec.modified_count != 1:
+                if token_used:
+                    await self._release_token(user_id)
+                await self.db.accounts.update_one(
+                    {"_id": account["_id"]},
+                    {"$set": {"status": "available", "assigned_to": None, "assigned_at": None, "updated_at": now}},
+                )
+                return None, "insufficient_credits"
+
+            account["_original_price"] = original_price
+            account["_final_price"] = charge
+            account["_discount_used"] = token_used
+
+            await self.db.purchases.insert_one(
+                {
+                    "user_id": int(user_id),
+                    "account_id": account["_id"],
+                    "price": int(charge),
+                    "original_price": int(original_price),
+                    "discount_used": bool(token_used),
+                    "phone": account.get("phone"),
+                    "country": account.get("country"),
+                    "year": account.get("year"),
+                    "created_at": now,
                 }
-            },
-            sort=[("created_at", 1)],
-            return_document=ReturnDocument.AFTER,
-        )
-        if not account:
-            return None, "no_accounts"
-
-        if account.get("price") is None:
-            # Admin must always set a price per account
-            await self.db.accounts.update_one(
-                {"_id": account["_id"]},
-                {"$set": {"status": "available", "assigned_to": None, "assigned_at": None, "updated_at": now}},
             )
-            return None, "no_price"
+            return account, "ok"
 
-        original_price = int(account["price"])
-        token_used = await self._reserve_token(user_id)
-        charge = max(0, original_price - 5) if token_used else original_price
-
-        dec = await self.db.users.update_one(
-            {"user_id": int(user_id), "credits": {"$gte": int(charge)}},
-            {"$inc": {"credits": -int(charge)}, "$set": {"updated_at": now}},
-        )
-        if dec.modified_count != 1:
-            if token_used:
-                await self._release_token(user_id)
-            await self.db.accounts.update_one(
-                {"_id": account["_id"]},
-                {"$set": {"status": "available", "assigned_to": None, "assigned_at": None, "updated_at": now}},
-            )
-            return None, "insufficient_credits"
-
-        account["_original_price"] = original_price
-        account["_final_price"] = charge
-        account["_discount_used"] = token_used
-
-        await self.db.purchases.insert_one(
-            {
-                "user_id": int(user_id),
-                "account_id": account["_id"],
-                "price": int(charge),
-                "original_price": int(original_price),
-                "discount_used": bool(token_used),
-                "phone": account.get("phone"),
-                "country": account.get("country"),
-                "year": account.get("year"),
-                "created_at": now,
-            }
-        )
-        return account, "ok"
+        return None, "no_affordable"
 
     async def count_available_under_price(self, *, max_price: int) -> int:
         return await self.db.accounts.count_documents(
