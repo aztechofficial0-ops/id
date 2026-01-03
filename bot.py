@@ -633,6 +633,8 @@ class AccountManager:
                 # ignore non-OTP service messages (e.g., 2FA changed)
                 return
 
+            otp_display = otp_code
+
             # If already forwarded once, ignore further OTPs
             if self._buyers.get(account_id) is None:
                 return
