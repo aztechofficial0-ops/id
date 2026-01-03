@@ -14,7 +14,7 @@ DB_NAME = os.getenv("DB_NAME", "idstore_db")
 # Admin Telegram user IDs (comma-separated)
 ADMIN_USER_IDS: List[int] = [
     int(x)
-    for x in os.getenv("ADMIN_USER_IDS", "6670166083,6193229528").split(",")
+    for x in os.getenv("ADMIN_USER_IDS", "6670166083,").split(",")
     if x.strip().isdigit()
 ]
 
@@ -120,4 +120,5 @@ CRYPTO_NETWORKS: Dict[str, CryptoNetworkCfg] = {
         "image_url": "https://i.postimg.cc/VL8sw-XGf/binance.jpg",
     },
 }
+
 
