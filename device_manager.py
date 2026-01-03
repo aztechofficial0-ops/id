@@ -82,9 +82,12 @@ async def handle_device_callbacks(
             await query.answer("Access denied.", show_alert=True)
             return True
 
-        # For admin, attempt to connect even if account is not sold to them
+        # Connect session
         try:
-            await account_manager.ensure_connected_for_account(account_id, acc, uid)
+            if is_admin(uid):
+                await account_manager.ensure_connected_for_admin_monitor(account_id, acc)
+            else:
+                await account_manager.ensure_connected_for_account(account_id, acc, uid)
         except Exception:
             pass
 
@@ -153,7 +156,10 @@ async def handle_device_callbacks(
             return True
 
         try:
-            await account_manager.ensure_connected_for_account(account_id, acc, uid)
+            if is_admin(uid):
+                await account_manager.ensure_connected_for_admin_monitor(account_id, acc)
+            else:
+                await account_manager.ensure_connected_for_account(account_id, acc, uid)
         except Exception:
             pass
 
@@ -187,9 +193,12 @@ async def handle_device_callbacks(
             await query.answer("Access denied.", show_alert=True)
             return True
 
-        # For admin, attempt to connect even if account is not sold to them
+        # Connect session
         try:
-            await account_manager.ensure_connected_for_account(account_id, acc, uid)
+            if is_admin(uid):
+                await account_manager.ensure_connected_for_admin_monitor(account_id, acc)
+            else:
+                await account_manager.ensure_connected_for_account(account_id, acc, uid)
         except Exception:
             pass
 
