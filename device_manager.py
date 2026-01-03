@@ -123,6 +123,8 @@ async def handle_device_callbacks(
 
             if current:
                 label = "🤖 Bot Device (current)"
+                rows.append([InlineKeyboardButton(label, callback_data=f"dev:logout_current:{str(account_id)}")])
+                continue
             else:
                 label_parts = [p for p in [dev, plat, app] if p]
                 label = "📱 " + (" ".join(label_parts) if label_parts else f"Device {i}")
@@ -136,6 +138,37 @@ async def handle_device_callbacks(
             parse_mode=None,
             reply_markup=kb(rows),
         )
+        return True
+
+    if data.startswith("dev:logout_current:"):
+        acc_id_s = data.split(":", 2)[2]
+        account_id = _parse_oid(acc_id_s)
+        if not account_id:
+            await query.answer("Invalid request.", show_alert=True)
+            return True
+
+        acc = await _ensure_buyer_access(account_id)
+        if not acc:
+            await query.answer("Access denied.", show_alert=True)
+            return True
+
+        try:
+            await account_manager.ensure_connected_for_account(account_id, acc, uid)
+        except Exception:
+            pass
+
+        client = account_manager.get_client(account_id)
+        if not client:
+            await query.answer("❌ Bot session not found.", show_alert=True)
+            return True
+
+        try:
+            await client.log_out()
+        except Exception:
+            await query.answer("❌ Failed to logout current session.", show_alert=True)
+            return True
+
+        await query.answer("✅ Logged out bot session.", show_alert=True)
         return True
 
     if data.startswith("dev:logout:"):
