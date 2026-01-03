@@ -5,6 +5,12 @@ from typing import Any, Optional
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+
+# Use certifi CA bundle for TLS connections to MongoDB Atlas (helps on Windows/Python)
+try:
+    import certifi  # type: ignore
+except Exception:  # pragma: no cover
+    certifi = None  # type: ignore
 from pymongo import ReturnDocument
 
 from config import DB_NAME, MONGO_URI
@@ -20,7 +26,11 @@ def utcnow() -> datetime:
 def get_client() -> AsyncIOMotorClient:
     global _client
     if _client is None:
-        _client = AsyncIOMotorClient(MONGO_URI)
+        kwargs: dict[str, Any] = {}
+        if certifi is not None:
+            kwargs["tlsCAFile"] = certifi.where()
+        # keep default timeouts unless overridden by URI
+        _client = AsyncIOMotorClient(MONGO_URI, **kwargs)
     return _client
 
 
@@ -153,6 +163,21 @@ class Repo:
             {"$unset": {"base_price": ""}},
         )
         return await self.set_bulk_discount(enabled=False, percent=0)
+
+    # -------- Payment toggles --------
+    async def get_crypto_enabled(self) -> bool:
+        doc = await self.db.admin_settings.find_one({"key": "crypto_enabled"})
+        if not doc:
+            return True
+        return bool(doc.get("enabled", True))
+
+    async def set_crypto_enabled(self, *, enabled: bool) -> bool:
+        await self.db.admin_settings.update_one(
+            {"key": "crypto_enabled"},
+            {"$set": {"key": "crypto_enabled", "enabled": bool(enabled), "updated_at": utcnow()}},
+            upsert=True,
+        )
+        return await self.get_crypto_enabled()
 
     # ----------------------------
     # Referral / earnings
@@ -333,18 +358,17 @@ class Repo:
     # QR settings
     # ----------------------------
     async def get_inr_qr_flags(self) -> dict[str, bool]:
-        """Return {'qr1': bool, 'qr2': bool, 'qr3': bool}. Defaults to all True."""
+        """Return {'qr1': bool, 'qr2': bool}. Defaults to both True."""
         doc = await self.db.qr_settings.find_one({"key": "inr"})
         if not doc:
-            return {"qr1": True, "qr2": True, "qr3": True}
+            return {"qr1": True, "qr2": True}
         return {
             "qr1": bool(doc.get("qr1", True)),
             "qr2": bool(doc.get("qr2", True)),
-            "qr3": bool(doc.get("qr3", True)),
         }
 
     async def set_inr_qr_flag(self, *, qr_key: str, enabled: bool) -> dict[str, bool]:
-        if qr_key not in {"qr1", "qr2", "qr3"}:
+        if qr_key not in {"qr1", "qr2"}:
             return await self.get_inr_qr_flags()
         await self.db.qr_settings.update_one(
             {"key": "inr"},
