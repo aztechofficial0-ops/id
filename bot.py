@@ -97,6 +97,7 @@ from config import (
     CRYPTO_NETWORKS,
     INR_QRS,
     START_IMAGE,
+    SUPPORT_USERNAME,
 )
 
 # Backward-compatible: if REFERRAL_PERCENT is not present in config.py yet
@@ -262,7 +263,7 @@ def main_menu(is_admin: bool) -> InlineKeyboardMarkup:
             InlineKeyboardButton("💳 Deposit", callback_data="dep:start"),
         ],
         [
-            InlineKeyboardButton("🆘 Support", url="https://t.me/DreamAccountsupportbot"),
+            InlineKeyboardButton("🆘 Support", url=f"https://t.me/{SUPPORT_USERNAME}"),
             InlineKeyboardButton("🔎 Find by Credits", callback_data="find:credits"),
         ],
         [InlineKeyboardButton("🤝 Refer & Earn", callback_data="ref:menu")],
@@ -1378,7 +1379,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     if text_in == "🆘 Support":
-        await update.message.reply_text("Support: @DreamAccountsupportbot")
+        await update.message.reply_text(f"Support: @{SUPPORT_USERNAME}")
         return
 
     if text_in == "🛠 Admin" and is_admin(uid):
