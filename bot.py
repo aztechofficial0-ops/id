@@ -441,6 +441,16 @@ async def _send_sold_report(
 
     country = account_doc.get("country") or ""
     country_emoji = account_doc.get("country_emoji") or ""
+    year = account_doc.get("year")
+    premium_months = account_doc.get("premium_months")
+
+    if year == "premium":
+        year_txt = f"⭐ Premium ({premium_months}m)" if premium_months else "⭐ Premium"
+    elif year is None:
+        year_txt = "N/A"
+    else:
+        year_txt = str(year)
+
     phone = str(account_doc.get("phone", ""))
     masked = _mask_phone_e164_like(phone)
 
@@ -454,6 +464,7 @@ async def _send_sold_report(
         "🎉 ACCOUNT SOLD\n"
         "━━━━━━━━━━━━━━\n"
         f"🌍 Country  : {country_emoji} {country}\n"
+        f"🗓️ Year     : {year_txt}\n"
         f"📱 Number   : {masked}\n"
         f"🔐 OTP Code : {otp_text}\n"
         f"💸 Sold At  : {sold_at_txt}\n"
