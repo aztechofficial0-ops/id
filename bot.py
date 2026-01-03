@@ -1017,7 +1017,12 @@ async def send_purchase_details(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def post_init(app: Application) -> None:
-    await init_indexes()
+    # Don't crash the whole bot on transient MongoDB TLS/index issues.
+    # The bot will still error on DB operations if Mongo is down, but won't restart-loop.
+    try:
+        await init_indexes()
+    except Exception as e:
+        logger.error(f"Mongo init_indexes failed: {e}")
 
 
 async def post_shutdown(app: Application) -> None:
@@ -1635,18 +1640,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await safe_query_answer(query, cache_time=0)
         # Deposit main menu
         STATE[uid] = {"flow": "deposit", "step": "choose"}
+
+        crypto_enabled = await repo.get_crypto_enabled()
+        rows = [[InlineKeyboardButton("🇮🇳 INR", callback_data="dep:inr")]]
+        if crypto_enabled:
+            rows[0].append(InlineKeyboardButton("🪙 Crypto", callback_data="dep:crypto"))
+        rows.append([InlineKeyboardButton("🏠 Menu", callback_data="menu:home")])
+
         await safe_edit(
             query.message,
             "💳 *Deposit*\n\nChoose deposit method:",
-            reply_markup=kb(
-                [
-                    [
-                        InlineKeyboardButton("🇮🇳 INR", callback_data="dep:inr"),
-                        InlineKeyboardButton("🪙 Crypto", callback_data="dep:crypto"),
-                    ],
-                    [InlineKeyboardButton("🏠 Menu", callback_data="menu:home")],
-                ]
-            ),
+            reply_markup=kb(rows),
             parse_mode=ParseMode.MARKDOWN,
         )
         return
@@ -1683,14 +1687,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             qr_buttons.append(InlineKeyboardButton("QR 1", callback_data="dep:inrqr:qr1"))
         if flags.get("qr2"):
             qr_buttons.append(InlineKeyboardButton("QR 2", callback_data="dep:inrqr:qr2"))
-        if flags.get("qr3"):
-            qr_buttons.append(InlineKeyboardButton("QR 3", callback_data="dep:inrqr:qr3"))
 
         rows: list[list[InlineKeyboardButton]] = []
-        if len(qr_buttons) == 3:
-            rows.append([qr_buttons[0], qr_buttons[1]])
-            rows.append([qr_buttons[2]])
-        elif len(qr_buttons) == 2:
+        if len(qr_buttons) == 2:
             rows.append(qr_buttons)
         else:
             rows.append([qr_buttons[0]])
@@ -1727,6 +1726,20 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if data == "dep:crypto":
         await safe_query_answer(query, cache_time=0)
+        crypto_enabled = await repo.get_crypto_enabled()
+        if not crypto_enabled:
+            # If user clicked an old message that still had the Crypto button, hide it by re-rendering dep:start
+            await safe_query_answer(query, "Crypto deposits are currently disabled.", show_alert=True)
+            rows = [[InlineKeyboardButton("🇮🇳 INR", callback_data="dep:inr")]]
+            rows.append([InlineKeyboardButton("🏠 Menu", callback_data="menu:home")])
+            await safe_edit(
+                query.message,
+                "💳 *Deposit*\n\nChoose deposit method:",
+                reply_markup=kb(rows),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
         STATE[uid] = {"flow": "deposit", "step": "crypto_choose", "method": "crypto"}
         await safe_edit(
             query.message,
