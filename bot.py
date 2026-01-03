@@ -2018,7 +2018,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             year=year,
         )
         if not account:
-            if reason == "insufficient_credits":
+            if reason in {"insufficient_credits", "no_affordable"}:
                 # Show current credits + minimum required (best effort)
                 udoc = await repo.ensure_user(uid, username=update.effective_user.username)
                 have = int(udoc.get("credits", 0))
@@ -2036,12 +2036,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 if need is None:
                     await safe_query_answer(query, f"❌ Not enough credits.\nYou have: {have}", show_alert=True)
                 else:
-                    await safe_query_answer(query, f"❌ Not enough credits.\nYou have: {have}\nRequired: {need}", show_alert=True)
+                    await safe_query_answer(query, f"❌ Not enough credits.\nYou have: {have}\nMinimum price: {int(need)}", show_alert=True)
                 return
             if reason == "no_accounts":
                 await safe_query_answer(query, "❌ No account left in this category.", show_alert=True)
                 return
-            await safe_query_answer(query, "❌ Purchase failed.", show_alert=True)
+            await safe_query_answer(query, f"❌ Purchase failed ({reason}).", show_alert=True)
             return
 
         # also show policy message
