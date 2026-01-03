@@ -625,8 +625,9 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         flags = await repo.get_inr_qr_flags()
         qr1 = "ON ✅" if flags.get("qr1") else "OFF ❌"
         qr2 = "ON ✅" if flags.get("qr2") else "OFF ❌"
-        qr3 = "ON ✅" if flags.get("qr3") else "OFF ❌"
-        text = f"💠 INR QRs\n\nQR 1: {qr1}\nQR 2: {qr2}\nQR 3: {qr3}"
+        crypto_enabled = await repo.get_crypto_enabled()
+        crypto_txt = "ON ✅" if crypto_enabled else "OFF ❌"
+        text = f"💠 Payment Settings\n\nQR 1: {qr1}\nQR 2: {qr2}\n\nCrypto: {crypto_txt}"
         await safe_edit(
             query.message,
             text,
@@ -637,7 +638,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
                         InlineKeyboardButton("Toggle QR 1", callback_data="admin:qrs:toggle:qr1"),
                         InlineKeyboardButton("Toggle QR 2", callback_data="admin:qrs:toggle:qr2"),
                     ],
-                    [InlineKeyboardButton("Toggle QR 3", callback_data="admin:qrs:toggle:qr3")],
+                    [InlineKeyboardButton("Toggle Crypto", callback_data="admin:qrs:toggle:crypto")],
                     [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
                 ]
             ),
@@ -648,13 +649,19 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer(cache_time=0)
         await restore_main_reply_menu(query.message)
         qr_key = data.split(":", 3)[3]
-        flags = await repo.get_inr_qr_flags()
-        new_enabled = not bool(flags.get(qr_key))
-        flags = await repo.set_inr_qr_flag(qr_key=qr_key, enabled=new_enabled)
+        if qr_key == "crypto":
+            cur = await repo.get_crypto_enabled()
+            await repo.set_crypto_enabled(enabled=not cur)
+            flags = await repo.get_inr_qr_flags()
+        else:
+            flags = await repo.get_inr_qr_flags()
+            new_enabled = not bool(flags.get(qr_key))
+            flags = await repo.set_inr_qr_flag(qr_key=qr_key, enabled=new_enabled)
         qr1 = "ON ✅" if flags.get("qr1") else "OFF ❌"
         qr2 = "ON ✅" if flags.get("qr2") else "OFF ❌"
-        qr3 = "ON ✅" if flags.get("qr3") else "OFF ❌"
-        text = f"💠 INR QRs\n\nQR 1: {qr1}\nQR 2: {qr2}\nQR 3: {qr3}"
+        crypto_enabled = await repo.get_crypto_enabled()
+        crypto_txt = "ON ✅" if crypto_enabled else "OFF ❌"
+        text = f"💠 Payment Settings\n\nQR 1: {qr1}\nQR 2: {qr2}\n\nCrypto: {crypto_txt}"
         await safe_edit(
             query.message,
             text,
@@ -665,7 +672,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
                         InlineKeyboardButton("Toggle QR 1", callback_data="admin:qrs:toggle:qr1"),
                         InlineKeyboardButton("Toggle QR 2", callback_data="admin:qrs:toggle:qr2"),
                     ],
-                    [InlineKeyboardButton("Toggle QR 3", callback_data="admin:qrs:toggle:qr3")],
+                    [InlineKeyboardButton("Toggle Crypto", callback_data="admin:qrs:toggle:crypto")],
                     [InlineKeyboardButton("⬅️ Back", callback_data="admin:menu")],
                 ]
             ),
